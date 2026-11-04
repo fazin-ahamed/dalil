@@ -11,17 +11,17 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 #[cfg(any(target_os = "linux", test))]
 use serde_json::Value;
 
 /// Longest edge of the captured image in pixels. The tutor needs no more than this to point at things.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", windows, test))]
 const MAX_EDGE: f64 = 1280.0;
 /// Larger images are refused, which keeps the chat request well inside its 8 MiB limit.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 const MAX_IMAGE_BYTES: usize = 3 * 1024 * 1024;
 /// How long each helper may run before it is killed.
 #[cfg(target_os = "linux")]
@@ -44,11 +44,97 @@ pub async fn capture_screen() -> Result<ScreenShotOut, String> {
     return tauri::async_runtime::spawn_blocking(capture_focused)
         .await
         .map_err(|_| "capture-unavailable".to_string())?;
-    // chisle: Windows capture needs the xcap crate, add when a Windows build exists
     #[cfg(windows)]
-    return Err("capture-unavailable".into());
+    return tauri::async_runtime::spawn_blocking(capture_focused_windows)
+        .await
+        .map_err(|_| "capture-unavailable".to_string())?;
     #[cfg(not(any(target_os = "linux", windows)))]
     return Err("capture-unavailable".into());
+}
+
+/// Windows: the monitor holding the foreground window, copied with GDI and shrunk so the long edge is at
+/// most `MAX_EDGE`, then encoded as a JPEG. No helper program is needed.
+#[cfg(windows)]
+fn capture_focused_windows() -> Result<ScreenShotOut, String> {
+    use std::{
+        mem::{size_of, zeroed},
+        ptr::null_mut,
+    };
+    use windows_sys::Win32::{
+        Graphics::Gdi::{
+            CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, GetMonitorInfoW,
+            MonitorFromWindow, ReleaseDC, SelectObject, SetStretchBltMode, StretchBlt, BITMAPINFO, BITMAPINFOHEADER,
+            BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, HALFTONE, MONITORINFO, MONITOR_DEFAULTTONEAREST, SRCCOPY,
+        },
+        UI::WindowsAndMessaging::GetForegroundWindow,
+    };
+
+    let fail = || "capture-unavailable".to_string();
+    // SAFETY: plain GDI calls. Every handle is checked and released before returning, and `pixels` is
+    // sized for `w * h` 32-bit pixels, which is what GetDIBits is told it may write.
+    let (pixels, w, h) = unsafe {
+        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
+        let mut info: MONITORINFO = zeroed();
+        info.cbSize = size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(monitor, &mut info) == 0 {
+            return Err(fail());
+        }
+        let area = info.rcMonitor;
+        let (src_w, src_h) = (area.right - area.left, area.bottom - area.top);
+        if src_w <= 0 || src_h <= 0 {
+            return Err(fail());
+        }
+        let scale = (MAX_EDGE / f64::from(src_w.max(src_h))).min(1.0);
+        let w = ((f64::from(src_w) * scale).round() as i32).max(1);
+        let h = ((f64::from(src_h) * scale).round() as i32).max(1);
+
+        let screen = GetDC(null_mut());
+        if screen.is_null() {
+            return Err(fail());
+        }
+        let memory = CreateCompatibleDC(screen);
+        let bitmap = CreateCompatibleBitmap(screen, w, h);
+        let mut pixels = vec![0u8; w as usize * h as usize * 4];
+        let mut copied = false;
+        if !memory.is_null() && !bitmap.is_null() {
+            let previous = SelectObject(memory, bitmap);
+            SetStretchBltMode(memory, HALFTONE);
+            let blit = StretchBlt(memory, 0, 0, w, h, screen, area.left, area.top, src_w, src_h, SRCCOPY | CAPTUREBLT);
+            // The bitmap must not be selected into a device context while its bits are read.
+            SelectObject(memory, previous);
+            let mut header: BITMAPINFO = zeroed();
+            header.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+            header.bmiHeader.biWidth = w;
+            header.bmiHeader.biHeight = -h; // negative: rows run top to bottom
+            header.bmiHeader.biPlanes = 1;
+            header.bmiHeader.biBitCount = 32;
+            header.bmiHeader.biCompression = BI_RGB;
+            let rows = GetDIBits(screen, bitmap, 0, h as u32, pixels.as_mut_ptr().cast(), &mut header, DIB_RGB_COLORS);
+            copied = blit != 0 && rows == h;
+        }
+        if !bitmap.is_null() {
+            DeleteObject(bitmap);
+        }
+        if !memory.is_null() {
+            DeleteDC(memory);
+        }
+        ReleaseDC(null_mut(), screen);
+        if !copied {
+            return Err(fail());
+        }
+        (pixels, w, h)
+    };
+
+    // GDI hands back blue, green, red, unused. The encoder takes that order as it is.
+    let mut jpeg = Vec::new();
+    jpeg_encoder::Encoder::new(&mut jpeg, 70)
+        .encode(&pixels, w as u16, h as u16, jpeg_encoder::ColorType::Bgra)
+        .map_err(|_| fail())?;
+    if jpeg.len() > MAX_IMAGE_BYTES {
+        return Err("too-large".into());
+    }
+    let data_url = format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg));
+    Ok(ScreenShotOut { data_url, width: w as u32, height: h as u32 })
 }
 
 /// niri names the focused output and grim takes it, scaled so the long edge is at most `MAX_EDGE`. If that

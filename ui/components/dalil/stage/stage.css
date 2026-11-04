@@ -1,0 +1,25 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: custom · surface: absolute
+ * paper: oklch(95.7% 0.010 262) · accent: oklch(49.1% 0.185 263) · display: Gaegu · body: Onest
+ * nav: the notch · signature: the blue pointer that leaves the notch, flies to the control and draws its card
+ * states: rest, home, listening, thinking, guiding, waiting, correcting, done, error, setup, connecting, connected, receipts
+ * axes: light/handwritten/chromatic-blue · posture: calm, hand-inked, deliberate · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 · weakest: S, a plain top bar by design; the hand-ink cards and the flight carry the identity */
+/* Hallmark · waive 7b · pure black notch matches the laptop bezel and hangs flush from the top edge · the notch must read as one object with the screen bezel */
+/* Hallmark · waive 47b · the notch is this product's own component with real controls inside, not a re-drawn OS window · notch panels and idle states carry live buttons */
+/* Stage motion helpers. Opacity only: the settings content fades when the section changes. */
+
+@keyframes dalil-stage-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dalil-stage-fade {
+  animation: dalil-stage-fade 160ms var(--ease-dalil-out, cubic-bezier(0.23, 1, 0.32, 1)) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dalil-stage-fade {
+    animation-duration: 120ms;
+    animation-timing-function: linear;
+  }
+}

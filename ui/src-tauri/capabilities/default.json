@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Event and window basics for the notch window. App commands need no extra permission.",
+  "windows": [
+    "notch",
+    "overlay"
+  ],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-start-dragging"
+  ]
+}

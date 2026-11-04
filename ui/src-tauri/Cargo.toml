@@ -1,0 +1,43 @@
+[package]
+name = "dalil"
+version = "0.1.0"
+description = "Dalil: an on-screen guide you talk to"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+name = "dalil_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+url = "2"
+cpal = "0.15"
+hound = "3"
+base64 = "0.22"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+# Wayland compositors (niri, Sway, Hyprland, KDE) place a plain window wherever they like. A
+# layer-shell surface can be pinned to the top edge. GNOME lacks the protocol and falls back.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
+
+# Desktop only: a second `dalil --ask` hands its flag to the running notch and exits.
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+# Windows reads the foreground window title for the tutor's context (src/context.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

@@ -1,0 +1,180 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: custom · surface: absolute
+ * paper: oklch(95.7% 0.010 262) · accent: oklch(49.1% 0.185 263) · display: Gaegu · body: Onest
+ * nav: the notch · signature: the blue pointer that leaves the notch, flies to the control and draws its card
+ * states: rest, home, listening, thinking, guiding, waiting, correcting, done, error, setup, connecting, connected, receipts
+ * axes: light/handwritten/chromatic-blue · posture: calm, hand-inked, deliberate · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 · weakest: S, a plain top bar by design; the hand-ink cards and the flight carry the identity */
+/* Hallmark · waive 7b · pure black notch matches the laptop bezel and hangs flush from the top edge · the notch must read as one object with the screen bezel */
+/* Hallmark · waive 47b · the notch is this product's own UI, built as components and not a re-drawn OS window · notch panels carry real controls */
+/* Dalil theme layer. Imported last from styles/globals.css.
+ * Two fixed worlds on top of BoardUI's semantic tokens:
+ *   :root  = grid paper (guide cards, the design-system site)
+ *   .dark  = night glass (the notch and everything that hangs from it)
+ * Components keep using BoardUI semantic utilities; only values change here. */
+
+@theme {
+  /* Dalil palette as Tailwind utilities: bg-paper, text-ink, border-rule, bg-notch ... */
+  --color-paper: #edf1f8;
+  --color-paper-2: #f6f8fc;
+  --color-paper-3: #e3e9f4;
+  --color-rule: #d5dceb;
+  --color-rule-strong: #bfc9de;
+  --color-control-edge: #7d8cab;
+  --color-ink: #1a2236;
+  --color-ink-2: #3f485c;
+  --color-muted: #5f6980;
+  --color-signal: #2f7bff;
+  --color-box-fill: #c6d9f8;
+  --color-hl-blue: #bdd3f7;
+  --color-hl-lilac: #d9d2f5;
+  --color-mark-error: #c8372d;
+  --color-mark-success: #198252;
+  --color-mark-warn: #a35f00;
+
+  --color-notch: #000000;
+  --color-notch-raised: #111114;
+  --color-notch-raised-2: #1a1a1f;
+  --color-notch-rule: #26262c;
+  --color-notch-edge: #585866;
+  --color-notch-ink: #f5f5f7;
+  --color-notch-ink-2: #b4b4bc;
+  --color-notch-muted: #8a8a94;
+  --color-notch-accent: #86aeff;
+  --color-notch-primary: #2a62f5;
+  --color-notch-ok: #5bd991;
+  --color-notch-warn: #ffc15c;
+  --color-notch-error: #ff7b72;
+  --color-notch-raised-3: #232329;
+  --color-notch-raised-4: #30303a;
+  --color-notch-placeholder: #7b7b85;
+  --color-notch-edge-hover: #7a7a88;
+  --color-notch-rule-strong: #3a3a43;
+  --color-notch-quiet: #5a5a63;
+
+  --font-sans: var(--font-onest), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+  --font-ink: var(--font-gaegu), "Segoe Print", "Bradley Hand", cursive;
+
+  --ease-dalil-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-dalil-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-dalil-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --shadow-notch: 0 0 0 1px rgb(255 255 255 / 0.07), 0 20px 44px -14px rgb(0 0 0 / 0.55), 0 6px 16px -6px rgb(0 0 0 / 0.4);
+  --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 14px 34px -12px rgb(26 34 54 / 0.3), 0 2px 6px rgb(26 34 54 / 0.08);
+  --shadow-glow-signal: 0 0 0 6px rgb(47 123 255 / 0.18), 0 0 22px 4px rgb(47 123 255 / 0.45);
+
+  --radius-card: 20px;
+  --radius-notch: 28px;
+  --radius-notch-sm: 16px;
+}
+
+/* Dalil blue on BoardUI's accent ramp. 500 carries the primary button gradient start. */
+:root {
+  --color-accent-50: #eef3fe;
+  --color-accent-100: #dde7fc;
+  --color-accent-200: #c6d9f8;
+  --color-accent-300: #9dbaf3;
+  --color-accent-400: #6f97ee;
+  --color-accent-500: #2f67ec;
+  --color-accent-600: #2456c7;
+  --color-accent-700: #1d45a0;
+  --color-accent-800: #183a82;
+  --color-accent-900: #152f66;
+  --color-accent-950: #0e2047;
+
+  /* Grid paper semantic layer */
+  --color-background-full: var(--color-paper);
+  --color-background-primary-default: var(--color-paper-2);
+  --color-background-inner-default: var(--color-paper-2);
+  --color-background-primary-hover: var(--color-paper-3);
+  --color-background-primary-active: var(--color-rule);
+  --color-background-secondary-default: var(--color-paper-3);
+  --color-background-secondary-hover: var(--color-rule);
+  --color-background-tertiary-default: var(--color-rule);
+  --color-background-tertiary-hover: var(--color-rule-strong);
+
+  --color-text-primary: var(--color-ink);
+  --color-text-secondary: var(--color-ink-2);
+  --color-text-tertiary: var(--color-muted);
+  --color-text-placeholder: #6b7590;
+  --color-text-error-primary: var(--color-mark-error);
+  --color-foreground-icon-error: var(--color-mark-error);
+  --color-border-error-default: var(--color-mark-error);
+
+  --color-border-button-default: var(--color-control-edge);
+  --color-border-button-hover: var(--color-muted);
+  --color-border-checkbox-default: var(--color-control-edge);
+  --color-border-table: var(--color-rule);
+  --color-separator-border: var(--color-rule);
+  --color-separator-border-strong: var(--color-rule-strong);
+  --color-border-focus-ring: var(--color-accent-600);
+
+  --color-foreground-icon-primary: var(--color-ink);
+  --color-foreground-icon-secondary: var(--color-muted);
+  --color-foreground-icon-tertiary: #7a849a;
+  --color-foreground-icon-quaternary: var(--color-rule-strong);
+}
+
+/* Night glass. Wrap any notch surface in .dark (the Notch components do this). */
+.dark {
+  --color-background-full: var(--color-notch);
+  --color-background-primary-default: var(--color-notch-raised);
+  --color-background-inner-default: var(--color-notch-raised);
+  --color-background-primary-hover: var(--color-notch-raised-2);
+  --color-background-primary-active: var(--color-notch-raised-3);
+  --color-background-secondary-default: var(--color-notch-raised-2);
+  --color-background-secondary-hover: var(--color-notch-raised-3);
+  --color-background-tertiary-default: var(--color-notch-rule);
+  --color-background-tertiary-hover: var(--color-notch-raised-4);
+
+  --color-text-primary: var(--color-notch-ink);
+  --color-text-secondary: var(--color-notch-ink-2);
+  --color-text-tertiary: var(--color-notch-muted);
+  --color-text-placeholder: var(--color-notch-placeholder);
+  --color-text-error-primary: var(--color-notch-error);
+  --color-foreground-icon-error: var(--color-notch-error);
+  --color-border-error-default: var(--color-notch-error);
+
+  --color-border-button-default: var(--color-notch-edge);
+  --color-border-button-hover: var(--color-notch-edge-hover);
+  --color-border-checkbox-default: var(--color-notch-edge);
+  --color-border-table: var(--color-notch-rule);
+  --color-separator-border: var(--color-notch-rule);
+  --color-separator-border-strong: var(--color-notch-rule-strong);
+  --color-border-focus-ring: var(--color-notch-accent);
+
+  --color-foreground-icon-primary: var(--color-notch-ink);
+  --color-foreground-icon-secondary: var(--color-notch-ink-2);
+  --color-foreground-icon-tertiary: var(--color-notch-muted);
+  --color-foreground-icon-quaternary: var(--color-notch-quiet);
+}
+
+@media (prefers-contrast: more) {
+  :root { --color-rule: #9aa6c0; }
+  .dark { --color-notch-rule: var(--color-notch-quiet); }
+}
+
+/* Shared hand-ink helpers */
+.font-ink { font-family: var(--font-ink); }
+.keycap {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; height: 22px; padding-inline: 8px; border-radius: 6px;
+  background: var(--color-notch-raised-2);
+  box-shadow: inset 0 -1px 0 var(--color-notch-rule), 0 0 0 1px var(--color-notch-rule);
+  color: var(--color-notch-ink); font: 500 12px/1 var(--font-sans);
+}
+
+html { overflow-x: clip; }
+body { overflow-x: clip; }
+
+/* Note tones for DiagramView: soft box fills, deeper outlines and the sand marker. Paper world only. */
+@theme {
+  --color-tone-rose: #f8dbe4;
+  --color-tone-rose-edge: #b8456d;
+  --color-tone-mint: #d3f0e2;
+  --color-tone-mint-edge: #1f7a56;
+  --color-tone-sand: #f7ecc6;
+  --color-tone-sand-edge: #8a6412;
+  --color-tone-lilac-edge: #5b48ad;
+  --color-hl-sand: #f0d27a;
+}

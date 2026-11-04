@@ -1,0 +1,64 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: custom · surface: absolute
+ * paper: oklch(95.7% 0.010 262) · accent: oklch(49.1% 0.185 263) · display: Gaegu · body: Onest
+ * nav: the notch · signature: the blue pointer that leaves the notch, flies to the control and draws its card
+ * states: rest, home, listening, thinking, guiding, waiting, correcting, done, error, setup, connecting, connected, receipts
+ * axes: light/handwritten/chromatic-blue · posture: calm, hand-inked, deliberate · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 · weakest: S, a plain top bar by design; the hand-ink cards and the flight carry the identity */
+/* Hallmark · waive 7b · pure black notch matches the laptop bezel and hangs flush from the top edge · the notch must read as one object with the screen bezel */
+/* Hallmark · waive 47b · the notch is this product's own component with real controls inside, not a re-drawn OS window · notch panels and idle states carry live buttons */
+/* Notch motion helpers. Keyframes only; colours and sizes come from utilities in notch.tsx.
+ * Every loop animates transform or opacity and is switched off for reduced motion. */
+
+@keyframes dalil-notch-idle {
+  from { transform: scaleY(var(--idle-low, 0.3)); }
+  to { transform: scaleY(1); }
+}
+
+@keyframes dalil-notch-shimmer {
+  from { opacity: 0.3; }
+  to { opacity: 1; }
+}
+
+@keyframes dalil-notch-breathe {
+  from { opacity: 1; }
+  to { opacity: 0.35; }
+}
+
+@keyframes dalil-notch-text-in {
+  from { opacity: 0; filter: blur(2px); transform: translateY(3px); }
+  to { opacity: 1; filter: blur(0); transform: translateY(0); }
+}
+
+@keyframes dalil-notch-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dalil-notch-idle {
+  animation: dalil-notch-idle 1.6s var(--ease-dalil-in-out, cubic-bezier(0.77, 0, 0.175, 1)) infinite alternate;
+  animation-delay: var(--delay, 0ms);
+}
+
+.dalil-notch-shimmer {
+  animation: dalil-notch-shimmer 1.1s var(--ease-dalil-in-out, cubic-bezier(0.77, 0, 0.175, 1)) infinite alternate;
+  animation-delay: var(--delay, 0ms);
+}
+
+.dalil-notch-breathe {
+  animation: dalil-notch-breathe 2.8s var(--ease-dalil-in-out, cubic-bezier(0.77, 0, 0.175, 1)) infinite alternate;
+}
+
+.dalil-notch-text-in {
+  animation: dalil-notch-text-in 220ms var(--ease-dalil-out, cubic-bezier(0.23, 1, 0.32, 1)) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dalil-notch-idle,
+  .dalil-notch-shimmer,
+  .dalil-notch-breathe {
+    animation: none;
+  }
+  .dalil-notch-text-in {
+    animation: dalil-notch-fade 120ms linear both;
+  }
+}

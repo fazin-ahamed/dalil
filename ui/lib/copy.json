@@ -1,0 +1,505 @@
+{
+  "notch": {
+    "rest": {
+      "mark": "Dalil"
+    },
+    "home": {
+      "greeting": {
+        "morning": "Morning, {name}.",
+        "afternoon": "Afternoon, {name}.",
+        "evening": "Evening, {name}.",
+        "night": "Night, {name}."
+      },
+      "hint": "Hold Ctrl + Alt and ask what's on your screen.",
+      "hint_bind": "Bind a key to dalil --talk to ask from anywhere.",
+      "ask_button": "Type a question",
+      "talk_button": "Talk",
+      "endpoint_chip_local": "On this computer",
+      "endpoint_chip_remote": "{host}"
+    },
+    "listening": {
+      "note": "No label. The live transcript is the only text."
+    },
+    "thinking": {
+      "label": "Reading your screen"
+    },
+    "guiding": {
+      "step": "Step {n} of {total}",
+      "skip": "Skip"
+    },
+    "waiting": {
+      "label": "Waiting for your click",
+      "idle": "Still with me? Say skip to move on."
+    },
+    "correcting": {
+      "happened": "That opened {name}.",
+      "back": "Press Esc to go back.",
+      "next": "Then try the step again."
+    },
+    "done": {
+      "one": "Done in 1 step.",
+      "other": "Done in {n} steps."
+    },
+    "error": {
+      "generic": {
+        "message": "I couldn't finish that.",
+        "action": "Try again"
+      },
+      "endpoint": {
+        "message": "{host} didn't answer.",
+        "action": "Fix endpoint"
+      },
+      "not_on_screen": {
+        "message": "I can't see {name} here. Open the screen that has it, then ask again.",
+        "action": "Ask again"
+      }
+    },
+    "setup": {
+      "title": "AI endpoint"
+    },
+    "receipts": {
+      "title": "What left this computer"
+    }
+  },
+  "ask": {
+    "placeholder": "Ask about your screen",
+    "talk": "Talk to Dalil",
+    "empty_hint": "Ask about anything on your screen.",
+    "aria_label": "Ask Dalil a question",
+    "send": "Send",
+    "thinking": "Thinking",
+    "empty_reply": "I don't have an answer for that yet."
+  },
+  "pointer": {
+    "labels": {
+      "click": "Click here",
+      "open": "Open this",
+      "type": "Type here",
+      "press_enter": "Press Enter",
+      "choose": "Choose this",
+      "turn_on": "Turn this on",
+      "turn_off": "Turn this off",
+      "drag": "Drag it here"
+    },
+    "count": "{n} of {total}",
+    "edge_parking": {
+      "scroll_up": "Scroll up",
+      "scroll_down": "Scroll down",
+      "scroll_left": "Scroll left",
+      "scroll_right": "Scroll right"
+    }
+  },
+  "cards": {
+    "sample_tag": "Sample",
+    "title_strips": {
+      "steps": "Binary to decimal",
+      "convert": "From decimal",
+      "checklist": "Display settings",
+      "explain": "Division",
+      "alternates": ["To decimal", "Binary shortcuts"]
+    },
+    "pill_labels": {
+      "steps": "Practise one at a time",
+      "convert": "Let me try 146",
+      "checklist": "Show me the next step",
+      "explain": "Explain it another way"
+    },
+    "pill_alternates": ["Explain division remainders", "Try another number", "Go back one step"],
+    "samples": {
+      "steps": {
+        "heading": "Add the place values",
+        "subtitle": "Keep the boxes that hold a 1, then add their values.",
+        "place_values": ["32", "16", "8", "4", "2", "1"],
+        "boxes": ["1", "0", "1", "1", "0", "1"],
+        "worked": "32 + 8 + 4 + 1 = 45",
+        "answer": "45"
+      },
+      "convert": {
+        "heading": "Decimal to binary",
+        "subtitle": "Divide by 2 and keep each remainder.",
+        "from": "45",
+        "to": "101101"
+      },
+      "checklist": {
+        "heading": "Turn on Night light",
+        "subtitle": "Dalil ticks each step once it sees you do it.",
+        "items": ["Open Display", "Find Night light", "Turn it on"]
+      },
+      "explain": {
+        "heading": "What a remainder is",
+        "body": "Split 45 into groups of 2. There are 22 full groups and 1 left over.",
+        "margin_note": "This is the remainder."
+      }
+    }
+  },
+  "setup": {
+    "intro": "Dalil talks only to the endpoint you give it.",
+    "first_run": "Connect an AI endpoint to begin.",
+    "empty": "Enter a base URL to see its models.",
+    "connecting": "Fetching models from {host}",
+    "connected": "Connected to {host}",
+    "saved": "Endpoint saved.",
+    "buttons": {
+      "connect_endpoint": "Connect endpoint",
+      "fetch_models": "Fetch models",
+      "use_model": "Use this model",
+      "type_model_id": "Type a model ID instead",
+      "send_test": "Send a test message",
+      "save": "Save endpoint",
+      "cancel": "Cancel",
+      "edit_key": "Edit key",
+      "check_url": "Check URL",
+      "retry": "Retry"
+    },
+    "fields": {
+      "base_url": {
+        "label": "Base URL",
+        "placeholder": "https://api.example.com/v1",
+        "helper": "Works with or without /v1 at the end."
+      },
+      "api_key": {
+        "label": "API key",
+        "placeholder": "Paste your key",
+        "helper": "Optional for local servers. Stored in your system keychain, never in a file."
+      },
+      "header_name": {
+        "label": "Header name",
+        "placeholder": "Authorization",
+        "helper": "Change this only if your server asks for another header."
+      },
+      "scheme": {
+        "label": "Scheme",
+        "options": ["Bearer", "None"],
+        "helper": "Bearer puts the word Bearer before the key. None sends the key as it is."
+      },
+      "stt_model": {
+        "label": "Speech to text model",
+        "placeholder": "whisper-1"
+      },
+      "tts_model": {
+        "label": "Text to speech model",
+        "placeholder": "tts-1"
+      },
+      "tts_voice": {
+        "label": "Voice",
+        "placeholder": "alloy"
+      },
+      "model": {
+        "label": "Model",
+        "placeholder": "Choose a model",
+        "helper": "Dalil uses this model for every answer."
+      },
+      "model_search": {
+        "label": "Search models",
+        "placeholder": "Search models"
+      },
+      "model_id": {
+        "label": "Model ID",
+        "placeholder": "The exact ID your server uses",
+        "helper": "Copy it from your server's own documentation."
+      }
+    },
+    "advanced": {
+      "label": "Advanced",
+      "helper": "Only needed if your server expects a different header or scheme."
+    },
+    "voice": {
+      "label": "Voice",
+      "helper": "Used when you talk to Dalil. Leave empty if your endpoint has no audio support, typing still works."
+    },
+    "use_screenshots": {
+      "label": "Use screenshots",
+      "helper": "Send a screenshot only when a control isn't in the app's structure."
+    },
+    "models": {
+      "found_one": "1 model found",
+      "found_other": "{total} models found",
+      "showing": "Showing {n} of {total}",
+      "no_match": "No models match this search."
+    },
+    "test": {
+      "helper": "Sends one short request to check the model answers.",
+      "sending": "Sending one short request.",
+      "pass": "Test passed. The model replied.",
+      "fail": "Test failed. Try another model, or check the URL and key."
+    },
+    "disclosure": {
+      "local": "Stays on this computer.",
+      "remote": "Your question and the visible controls go to {host}. Screenshots only if you turn them on.",
+      "remote_screenshots_on": "Your question, the visible controls and screenshots go to {host}."
+    },
+    "cors_note": "If a local server refuses Dalil, turn on CORS in its settings.",
+    "errors": {
+      "rejected": {
+        "message": "The endpoint rejected this key.",
+        "actions": ["Edit key"]
+      },
+      "no_model_list": {
+        "message": "This server has no model list.",
+        "actions": ["Type a model ID instead"]
+      },
+      "unreachable": {
+        "message": "Can't reach {host}.",
+        "actions": ["Check URL", "Retry"]
+      },
+      "timeout": {
+        "message": "No answer after 8 seconds.",
+        "actions": ["Retry"]
+      },
+      "not_a_model_list": {
+        "message": "The server answered, but not with a model list.",
+        "actions": ["Type a model ID instead"]
+      }
+    }
+  },
+  "receipts": {
+    "title": "What left this computer",
+    "empty": "Nothing has left this computer.",
+    "columns": {
+      "when": "When",
+      "sent_to": "Sent to",
+      "included": "Included"
+    },
+    "chips": {
+      "all": "All",
+      "screenshots": "Screenshots",
+      "endpoint": "{host}"
+    },
+    "included": {
+      "question": "Question",
+      "visible_controls": "Visible controls",
+      "screenshot": "Screenshot"
+    },
+    "footer": "Showing {n} of {total} requests."
+  },
+  "memory": {
+    "nav": "Memory",
+    "route": {
+      "name": "Memory",
+      "line": "What Dalil remembers about you. Search it, forget one topic, or forget everything."
+    },
+    "page": {
+      "title": "Memory",
+      "meta_title": "Memory | Dalil design system",
+      "intro": "What Dalil remembers about you, kept on this computer. Search it, forget one topic or forget everything. Nothing here is sent anywhere unless you ask a question that uses it.",
+      "live_heading": "Try it",
+      "live_note": "Sample topics, for layout only. Forget removes them from this page, and Esc closes the panel.",
+      "states_heading": "States",
+      "states_note": "Every state the list can show, drawn by the same panel as above."
+    },
+    "title": "What Dalil remembers",
+    "lead": "Topics from your lessons, newest first.",
+    "count": {
+      "one": "1 topic",
+      "other": "{total} topics"
+    },
+    "showing": "Showing {n} of {total}",
+    "search": {
+      "label": "Search topics and notes",
+      "placeholder": "Search topics and notes"
+    },
+    "kind": {
+      "learned": "Learned",
+      "struggled": "Needed help",
+      "asked": "Asked"
+    },
+    "in_app": "In {app}",
+    "forget": "Forget {topic}",
+    "forgot": "Forgot {topic}.",
+    "forgot_all": "Forgot everything.",
+    "empty": "Nothing yet. Dalil remembers a topic once you get it right, need help with it, or ask about it.",
+    "no_match": "No topic or note matches \"{query}\".",
+    "show_all": "Show all topics",
+    "privacy": "Stored on this computer. Nothing here is sent unless you ask a question that uses it.",
+    "forget_all": {
+      "button": "Forget everything",
+      "confirm": "Forget all {total} topics? This can't be undone.",
+      "yes": "Yes, forget all",
+      "keep": "Keep them"
+    },
+    "time": {
+      "now": "Just now",
+      "minutes": "{n} min ago",
+      "hours": "{n} h ago",
+      "days": "{n} d ago",
+      "weeks": "{n} wk ago",
+      "months": "{n} mo ago",
+      "years": "{n} y ago"
+    },
+    "demo": {
+      "closed": "Closed. Nothing was forgotten.",
+      "reopen": "Open what Dalil remembers",
+      "restore": "Restore sample topics"
+    },
+    "states": {
+      "empty": {
+        "title": "Empty",
+        "note": "Nothing learned yet. The privacy line still says where it lives."
+      },
+      "no_match": {
+        "title": "No match",
+        "note": "The search finds nothing. Show all topics brings them back.",
+        "query": "bluetooth"
+      },
+      "list": {
+        "title": "List",
+        "note": "Newest first. Forget removes one topic, and forget everything asks once."
+      }
+    },
+    "samples": {
+      "binary_decimal": {
+        "topic": "Binary to decimal",
+        "note": "Added the place values where the bit is 1, and got 45 right the first time.",
+        "app": "Calculator"
+      },
+      "division_remainder": {
+        "topic": "Division remainders",
+        "note": "Kept the quotient and dropped the remainder. Worked 45 out in groups of 2 to fix it.",
+        "app": "Calculator"
+      },
+      "display_settings": {
+        "topic": "Display settings",
+        "note": "Found Night light under Display without help.",
+        "app": "Settings"
+      },
+      "night_light": {
+        "topic": "Night light schedule",
+        "note": "Turned it on, then missed the schedule options under the switch.",
+        "app": "Settings"
+      },
+      "figma_layout": {
+        "topic": "Figma auto layout",
+        "note": "Set padding and gap on the frame instead of dragging its edges.",
+        "app": "Figma"
+      },
+      "screenshot_shortcut": {
+        "topic": "Screenshot shortcut",
+        "note": "Asked how to capture one window. Nothing to practise yet."
+      },
+      "dark_mode": {
+        "topic": "Dark mode",
+        "note": "Asked where the theme switch lives. Only asked, so there is nothing to practise yet.",
+        "app": "Settings"
+      }
+    }
+  },
+  "projects": {
+    "nav": "Projects",
+    "route": {
+      "name": "Projects",
+      "line": "Keep lessons and context apart for each folder or piece of work."
+    },
+    "page": {
+      "title": "Projects",
+      "meta_title": "Projects | Dalil design system",
+      "intro": "A project keeps what Dalil learns apart, one per folder or piece of work. Lessons with no project show in every project. Stored on this computer.",
+      "live_heading": "Try it",
+      "live_note": "Sample projects, for layout only. Choosing one changes this page only, and Esc closes the menu.",
+      "working_in": "Working in {name}. Lessons from this project and the ones with no project are used.",
+      "none_note": "No project. Every lesson Dalil has is used.",
+      "restore": "Restore sample projects"
+    },
+    "samples": {
+      "physics": "Physics homework",
+      "app": "my-app",
+      "app_folder": "/home/you/my-app"
+    },
+    "switcher": {
+      "menu": "Projects",
+      "none": "No project",
+      "active": "Active",
+      "empty": "No projects yet. Name one below.",
+      "delete": "Delete {name}",
+      "delete_tip": "Delete project. Its lessons stay.",
+      "new_heading": "New project",
+      "name_label": "Project name",
+      "name_placeholder": "Physics homework",
+      "folder_label": "Folder (optional)",
+      "folder_placeholder": "/home/you/my-app",
+      "add": "Add project",
+      "errors": {
+        "empty": "Name the project.",
+        "long": "Keep the name to 60 characters or fewer.",
+        "duplicate": "A project with this name already exists."
+      }
+    }
+  },
+  "settings": {
+    "endpoint": {
+      "label": "AI endpoint",
+      "helper": "{host}. Change the URL, key or model.",
+      "helper_local": "On this computer. Change the URL, key or model."
+    },
+    "model": {
+      "label": "Model",
+      "helper": "Used for every answer. Pick another from the list."
+    },
+    "hide_when_idle": {
+      "label": "Hide when idle",
+      "helper": "The small mark disappears until you hover the top edge."
+    },
+    "use_screenshots": {
+      "label": "Use screenshots",
+      "helper": "Send a screenshot only when a control isn't in the app's structure."
+    },
+    "large_pointer": {
+      "label": "Large pointer",
+      "helper": "A bigger pointer and a thicker ring, easier to follow."
+    },
+    "reduce_motion": {
+      "label": "Reduce motion",
+      "helper": "Follows your system setting. Flights become short fades."
+    },
+    "shortcut": {
+      "label": "Shortcut",
+      "helper": "Hold Ctrl + Alt to ask. Tap it to open Home."
+    },
+    "name_in_greeting": {
+      "label": "Name in greeting",
+      "helper": "Leave blank to use your first name from the system."
+    }
+  },
+  "aria": {
+    "notch_region": "Dalil",
+    "states": {
+      "rest": "Dalil is resting at the top of the screen.",
+      "home": "Home open. Hold Ctrl + Alt to ask.",
+      "listening": "Listening.",
+      "thinking": "Reading your screen.",
+      "guiding": "Step {n} of {total}.",
+      "waiting": "Waiting for your click.",
+      "correcting": "Off track. Press Esc to go back.",
+      "done_one": "Done in 1 step.",
+      "done_other": "Done in {n} steps.",
+      "error": "Something failed. Choose an action to continue.",
+      "setup": "AI endpoint setup open.",
+      "ask": "Ask open. Type a question and press Enter.",
+      "receipts": "Receipts open. Showing {n} of {total} requests."
+    },
+    "icon_buttons": {
+      "mark": "Open Home",
+      "gear": "Open settings",
+      "receipts": "Open receipts",
+      "endpoint_chip": "Endpoint {host}. Open setup.",
+      "endpoint_chip_local": "Endpoint on this computer. Open setup.",
+      "close": "Close",
+      "back": "Back",
+      "show_key": "Show API key",
+      "hide_key": "Hide API key",
+      "clear_search": "Clear search",
+      "open_model_list": "Open model list",
+      "refresh_models": "Refresh models",
+      "expand_advanced": "Show advanced fields",
+      "collapse_advanced": "Hide advanced fields",
+      "expand_receipt": "Show receipt details",
+      "collapse_receipt": "Hide receipt details"
+    },
+    "live": {
+      "connected": "Connected to {host}.",
+      "test_pass": "Test passed.",
+      "test_fail": "Test failed.",
+      "saved": "Endpoint saved. Back on Home."
+    },
+    "keyboard_hint": "Tab moves between controls, Enter confirms, Esc leaves."
+  }
+}

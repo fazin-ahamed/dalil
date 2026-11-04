@@ -85,6 +85,44 @@ describe("friendlyVoiceError", () => {
 });
 
 describe("voice outside the desktop app", () => {
+  it("does not play a native speech response that arrives after Stop", async (t) => {
+    const originals=["window","Audio"].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+    t.after(()=>{for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}});
+    let resolveWav!:(wav:string)=>void,requested!:()=>void,played=0;
+    const pending=new Promise<string>(resolve=>{resolveWav=resolve;}),request=new Promise<void>(resolve=>{requested=resolve;});
+    Object.defineProperty(globalThis,"window",{configurable:true,value:{__TAURI_INTERNALS__:{invoke:()=>{requested();return pending;}}}});
+    Object.defineProperty(globalThis,"Audio",{configurable:true,value:class {play(){played++;return Promise.resolve();}pause(){}}});
+    const reply=await speak("A lesson that has been interrupted.");await request;
+    reply.stop();assert.equal(await reply.audible,false);assert.equal(await reply.done,false);
+    resolveWav("UklGRg==");await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(played,0);
+  });
+
+  it("tracks actual browser speech and settles cancellation without late playback events", async (t) => {
+    let utterance: SpeechSynthesisUtterance | undefined;
+    let cancelled = 0;
+    const originals=["window","SpeechSynthesisUtterance"].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+    t.after(()=>{for(const [key,descriptor] of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else Reflect.deleteProperty(globalThis,key);}});
+    Object.defineProperty(globalThis, "window", {configurable:true,value:{ speechSynthesis: {
+      getVoices: () => [{}], cancel: () => { cancelled++; },
+      speak: (value: SpeechSynthesisUtterance) => { utterance = value; },
+    } }});
+    Object.defineProperty(globalThis, "SpeechSynthesisUtterance", {configurable:true,value:class { text:string;constructor(text:string) {this.text=text;} }});
+    const offsets:number[]=[];
+    const reply=await speak("First thought. Second thought.",{onProgress:offset=>offsets.push(offset)});
+    assert.ok(utterance);
+    utterance.onstart?.({} as SpeechSynthesisEvent);
+    assert.equal(await reply.audible,true);
+    utterance.onboundary?.({charIndex:15} as SpeechSynthesisEvent);
+    assert.deepEqual(offsets,[15]);
+    reply.stop();
+    assert.equal(await reply.done,false);
+    assert.equal(cancelled,1);
+    assert.equal(utterance.onstart,null);
+    assert.equal(utterance.onboundary,null);
+    assert.equal(utterance.onend,null);
+  });
+
   it("refuses to start or stop a recording with desktop-only", async () => {
     await assert.rejects(startListening(), { message: "desktop-only" });
     await assert.rejects(stopAndTranscribe(), { message: "desktop-only" });
@@ -99,7 +137,8 @@ describe("voice outside the desktop app", () => {
 
   it("speaks nothing and resolves at once when there is no voice to use", async () => {
     const reply = await speak("Press Ctrl+S to save.");
-    await reply.done;
+    assert.equal(await reply.audible,false);
+    assert.equal(await reply.done,false);
     reply.stop();
     const blank = await speak("   ");
     await blank.done;

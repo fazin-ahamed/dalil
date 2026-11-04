@@ -1,0 +1,25 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Dalil · surface: teacher stage
+ * body: Onest · display: Gaegu · signature: one thought, one pointer, one visual
+ * states: voice, fallback captions, paused, replay, dismissed · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H5 E4 S4 R5 V3 · weakest: V, a single teaching stage; removed duplicate title, footer and essay to keep the subject first. */
+/* Hallmark · dismissed 29 · the user requested translucent black subtitles at the screen bottom; reduced transparency uses a solid surface · no decorative glow or wash */
+/* Hallmark · finish-review: subagent · 1 finding · 1 resolved by landing beside text · recaptured and confirmed */
+:root {
+  --dalil-caption-surface: rgb(8 9 12 / 0.82);
+  --dalil-caption-solid: rgb(8 9 12);
+  --dalil-caption-ink: rgb(255 255 255);
+  --dalil-teaching-toolbar: color-mix(in srgb, var(--color-paper-2) 82%, transparent);
+}
+.dalil-teaching-toolbar { background: var(--dalil-teaching-toolbar); backdrop-filter: blur(16px); }
+.dalil-teaching-frame { isolation: isolate; }
+.dalil-caption-position { bottom: clamp(3rem, 7vh, 5.5rem); }
+.dalil-lesson-captions, .dalil-caption-controls {
+  color: var(--dalil-caption-ink);
+  background: var(--dalil-caption-surface);
+  backdrop-filter: blur(14px);
+}
+.dalil-lesson-captions { text-align: center; text-wrap: balance; overflow-wrap: anywhere; }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .dalil-lesson-captions, .dalil-caption-controls { background: var(--dalil-caption-solid); backdrop-filter: none; }
+  .dalil-teaching-toolbar { background: var(--color-paper-2); backdrop-filter: none; }
+}

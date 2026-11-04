@@ -9,13 +9,14 @@ import { DiagramView } from "@/components/dalil/scene/diagram-view";
 import { Model3DView } from "@/components/dalil/scene/model-3d";
 import { VisualFrame } from "@/components/dalil/scene/visual-frame";
 import { ScreenSketch } from "@/components/dalil/overlay/screen-sketch";
-import { MessageText } from "@/components/dalil/notch/message-text";
 import { Button } from "@/components/base/buttons/button";
-import { ScrollFade,useScrollFade } from "@/components/foundations/scroll-fade/scroll-fade";
+import { TeachingPlayer } from "@/components/dalil/scene/teaching-player";
+import { lessonFor,readLesson } from "@/lib/teaching";
+import { drawOrder } from "@/lib/diagram-geometry";
 import { readAnnotations } from "@/lib/annotations";
 import { MarkLabel } from "@/components/dalil/overlay/mark-label";
 import { PointerLayer, type PointerLayerHandle } from "@/components/dalil/pointer/pointer-layer";
-import type { Mark, OverlayCommand, ScreenAnnotation, Scene as VisualScene } from "@/lib/contracts";
+import type { Mark, OverlayCommand, ScreenAnnotation, TeachingBeat, Scene as VisualScene } from "@/lib/contracts";
 import { EXAMPLE_DIAGRAM, EXAMPLE_JET, EXAMPLE_TRIGONAL } from "@/lib/scene";
 import { isTauri } from "@/lib/native-bridge";
 import { setOverlayInput } from "@/lib/overlay";
@@ -52,7 +53,7 @@ interface Scene {
 interface Visual {
   id: number;
   scene: VisualScene;
-  text?: string;
+
 }
 
 interface CardScene {
@@ -74,7 +75,14 @@ export default function OverlayPage() {
   const [visual, setVisual] = useState<Visual | null>(null);
   const [annotations,setAnnotations]=useState<ScreenAnnotation[]>([]);
   const sketchBox=useRef<HTMLDivElement>(null);
-  const explanationFade=useScrollFade();
+  const [lesson,setLesson]=useState<{id:number;beats:TeachingBeat[]}|null>(null);
+  const [teachingIndex,setTeachingIndex]=useState(0);
+  const [readyVisual,setReadyVisual]=useState(0);
+  const captionControls=useRef<HTMLDivElement>(null);
+  const lessonSequence=useRef(0),lastLesson=useRef<TeachingBeat[]>([]);
+  const visualRef=useRef(visual);
+  useEffect(()=>{visualRef.current=visual;},[visual]);
+  const presentLesson=useCallback((beats:TeachingBeat[])=>{lastLesson.current=beats;setTeachingIndex(0);setLesson(beats.length?{id:++lessonSequence.current,beats}:null);},[]);
   const [fading, setFading] = useState(false);
   const visualBox = useRef<HTMLDivElement>(null);
   const cardBox = useRef<HTMLDivElement>(null);
@@ -90,7 +98,7 @@ export default function OverlayPage() {
   const reportInput = useCallback(() => {
     // Motion commits its transform on the next frame; native input must follow that position.
     requestAnimationFrame(() => {
-      void setOverlayInput([visualBox.current, cardBox.current, sketchBox.current].flatMap((el) => {
+      void setOverlayInput([visualBox.current, cardBox.current, sketchBox.current, captionControls.current].flatMap((el) => {
         if (!el) return [];
         const r = el.getBoundingClientRect();
         return [[Math.floor(r.left), Math.floor(r.top), Math.ceil(r.width), Math.ceil(r.height)] as [number, number, number, number]];
@@ -134,6 +142,7 @@ export default function OverlayPage() {
 
     const clearScene = () => {
       run += 1;
+      setLesson(null);
       window.clearTimeout(transientExpiry);
       stopTimers();
       pointer.current?.clear();
@@ -159,6 +168,8 @@ export default function OverlayPage() {
     };
 
     const apply = (cmd: OverlayCommand) => {
+      if(cmd.kind==="stop-teaching"){setLesson(null);setTeachingIndex(-1);pointer.current?.clear();return;}
+      if(cmd.kind==="lesson"){presentLesson(readLesson(cmd.beats,visualRef.current?.scene));return;}
       if (cmd.kind === "clear") {
         clearScene();
         return;
@@ -173,14 +184,15 @@ export default function OverlayPage() {
         setAnnotations([]);
       }
       setFading(false);
-      // Marks fade on their own. A scene or card stays until its red button is pressed.
+      // Marks fade on their own. A scene or card stays until closed.
       if (cmd.kind !== "scene" && cmd.kind !== "card") {
         window.clearTimeout(transientExpiry);
         transientExpiry=window.setTimeout(()=>{run+=1;pointer.current?.clear();setScene(s=>({...s,marks:[]}));setAnnotations([]);},IDLE_MS);
       }
       if (cmd.kind === "scene") {
         cardId += 1;
-        setVisual({ id: cardId, scene: cmd.scene, text:cmd.text });
+        setVisual({ id: cardId, scene: cmd.scene });
+        presentLesson(lessonFor(cmd.text??cmd.scene.title,cmd.scene,cmd.lesson));
         return;
       }
       if (cmd.kind === "annotations") { setAnnotations(readAnnotations(cmd.annotations));return; }
@@ -199,7 +211,7 @@ export default function OverlayPage() {
         return;
       }
       const at = toPixels(cmd.x, cmd.y, window.innerWidth, window.innerHeight);
-      void pointer.current?.flyTo({ x: at.x, y: at.y, width: 0, height: 0 }, { label: cmd.label });
+      void pointer.current?.flyTo({ x: at.x, y: at.y, width: 0, height: 0 }, { label: cmd.label, duration:cmd.duration });
     };
 
     const onMessage = (event: MessageEvent) => {
@@ -240,11 +252,11 @@ export default function OverlayPage() {
       window.clearTimeout(transientExpiry);
       demoTimers.forEach((id) => window.clearTimeout(id));
     };
-  }, []);
+  }, [presentLesson]);
 
   /* The mouse reaches the panels (to turn a model, to press a close button) and nothing else. */
   useEffect(() => {
-    const els = [visualBox.current, cardBox.current, sketchBox.current].filter((el): el is HTMLDivElement => el !== null);
+    const els = [visualBox.current, cardBox.current, sketchBox.current, captionControls.current].filter((el): el is HTMLDivElement => el !== null);
     reportInput();
     const settle = window.setTimeout(reportInput, 400);
     const observer = new ResizeObserver(reportInput);
@@ -255,7 +267,29 @@ export default function OverlayPage() {
       observer.disconnect();
       window.removeEventListener("resize", reportInput);
     };
-  }, [visual, card, annotations.length, reportInput]);
+  }, [visual, card, annotations.length, lesson?.id, reportInput]);
+
+  const onTeachingStep=useCallback((index:number,beat:TeachingBeat)=>{
+    setTeachingIndex(index);
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      if(!beat.target)return;
+      const target=[...(visualBox.current?.querySelectorAll("[data-teach-target]")??[])].find(el=>el.getAttribute("data-teach-target")===beat.target);
+      if(target){
+        const box=target.getBoundingClientRect();
+        const beside={x:box.right+36<window.innerWidth?box.right+12:Math.max(8,box.left-28),y:box.top+box.height/2,width:0,height:0};
+        void pointer.current?.flyTo(target.tagName.toLowerCase()==="circle"?target:beside,{ring:false,duration:380});
+      }
+    }));
+  },[]);
+  const finishTeaching=useCallback(()=>{setTeachingIndex(-1);pointer.current?.clear();},[]);
+  const teaching=lesson&&teachingIndex>=0;
+  const taught=teaching?lesson.beats.slice(0,teachingIndex+1).flatMap(beat=>beat.target?[beat.target]:[]):[];
+  const target=teaching?lesson.beats[teachingIndex]?.target:undefined;
+  const diagramRevealed=visual?.scene.type==="diagram"&&teaching?Math.max(1,...drawOrder(visual.scene).flatMap((item,index)=>taught.includes(item.id)?[index+1]:[])):undefined;
+  const model=visual?.scene.type==="model3d"?visual.scene:null;
+  const activeLabel=model&&target?model.labels.findIndex(label=>label.target===target):null;
+  const labelsRevealed=model&&teaching?Math.max(0,...model.labels.flatMap((label,index)=>typeof label.target==="string"&&taught.includes(label.target)?[index+1]:[])):undefined;
+  const anglesRevealed=model&&teaching?(model.angles??[]).filter(angle=>taught.includes(angle.id)).map(angle=>angle.id):undefined;
 
   return (
     <div ref={viewport} className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -291,24 +325,20 @@ export default function OverlayPage() {
             key={visual.id}
             ref={visualBox}
             className="absolute start-1/2 top-16 -translate-x-1/2"
-            style={{ x: visualX, y: visualY, width: visual.scene.type === "diagram" ? "min(640px, calc(100% - 3rem))" : "min(860px, calc(100% - 3rem))" }}
+            style={{ x: visualX, y: visualY, width: visual.scene.type === "diagram" ? "min(620px, calc(100% - 3rem))" : "min(700px, calc(100% - 3rem))" }}
             drag dragControls={visualDrag} dragListener={false} dragMomentum={false} dragElastic={0} dragConstraints={viewport}
             onDrag={reportInput} onDragEnd={reportInput}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.24, ease: EASE_OUT }}
+            transition={{type:"spring",bounce:0,duration:reduced?0.12:0.4}}
           >
-            <VisualFrame title={visual.scene.title || "Dalil"} onClose={() => setVisual(null)}
-              onMoveStart={(event) => visualDrag.start(event)} onMoveKey={(event) => moveByKey(event, "visual")}>
+            <VisualFrame title={visual.scene.title || "Dalil"} onClose={() => {setVisual(null);setLesson(null);finishTeaching();}}
+              onMoveStart={(event) => visualDrag.start(event)} onMoveKey={(event) => moveByKey(event, "visual")} onReplay={()=>presentLesson(lastLesson.current)}>
               {visual.scene.type === "diagram" ? (
-                <DiagramView scene={visual.scene} />
+                <DiagramView scene={visual.scene} revealed={diagramRevealed} />
               ) : (
-                <Model3DView scene={visual.scene} className="h-[min(460px,50vh)] w-full" />
+                <Model3DView scene={visual.scene} className="h-[min(440px,56vh)] w-full" onReady={()=>setReadyVisual(visual.id)} activeLabel={activeLabel} revealedLabels={labelsRevealed} revealedAngles={anglesRevealed}/>
               )}
-              {visual.text && <div className="relative border-t border-rule bg-paper">
-                <div onScroll={explanationFade.onScroll} className="max-h-[min(180px,23vh)] overflow-y-auto overscroll-contain p-4 select-text"><MessageText text={visual.text}/></div>
-                <ScrollFade progress={explanationFade.progress} surfaceClassName="from-paper"/>
-              </div>}
             </VisualFrame>
           </motion.div>
         ) : null}
@@ -336,6 +366,8 @@ export default function OverlayPage() {
         ) : null}
       </motion.div>
       <PointerLayer ref={pointer} />
+      {lesson&&<TeachingPlayer key={lesson.id} beats={lesson.beats} ready={!visual||visual.scene.type==="diagram"||readyVisual===visual.id}
+        onStep={onTeachingStep} onFinish={finishTeaching} onDismiss={()=>{setLesson(null);finishTeaching();}} controlsRef={captionControls} onLayout={reportInput}/>}
     </div>
   );
 }

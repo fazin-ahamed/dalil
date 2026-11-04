@@ -1,6 +1,6 @@
 # Build Dalil on Windows
 
-This source includes the improved chat, computer control, movable panels, tray menu, Windows shortcuts and staged notch hiding.
+This source includes the improved chat, computer control, movable panels, tray menu, Windows shortcuts and a persistent compact notch.
 
 ## Install prerequisites
 
@@ -41,7 +41,7 @@ The setup executable appears under `ui\src-tauri\target\x86_64-pc-windows-msvc\r
 
 ## If the app appears not to open
 
-Check the system tray overflow and press **Ctrl+Alt+Space**. The notch disappears after inactivity, and its window has no taskbar button. Left-click its tray icon to reopen chat; right-click for **Exit Dalil**.
+Check the system tray overflow and press **Ctrl+Alt+Space**. The notch shrinks to a tiny island after inactivity and stays visible; its window has no taskbar button. Left-click its tray icon to reopen chat; right-click for **Exit Dalil**.
 
 If no tray icon appears, close any existing Dalil instance in Task Manager, then run a development build from the `ui` terminal to capture startup errors:
 

@@ -729,7 +729,6 @@ function ThinkingLayer({live,text,onOpen,onStop}:{live:boolean;text?:string;onOp
     <ShimmerBars live={live}/>
     <button type="button" onClick={onOpen} aria-label="Open task conversation" className="min-w-0 flex-1 rounded-lg py-2 text-start focus-visible:outline-2 focus-visible:outline-border-focus-ring">
       <span className="block truncate text-body-medium text-notch-ink">{text??copy.notch.thinking.label}</span>
-      <span className="block text-caption-1-medium text-notch-muted">Working on your request</span>
     </button>
     <IconButton icon={RiStopCircleLine} size="small" aria-label="Stop current task" onClick={onStop} className="border-transparent bg-transparent text-notch-muted shadow-none hover:bg-notch-raised-2"/>
   </div>;

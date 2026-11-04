@@ -12,7 +12,9 @@ export const LEVEL_EVENT = "dalil://level";
 /** A spoken reply. `stop` cuts it short; `done` resolves when it ends, fails or is stopped. */
 export interface Speech {
   stop: () => void;
-  done: Promise<void>;
+  done: Promise<boolean>;
+  /** Resolves true only after audio or a browser utterance actually starts. */
+  audible: Promise<boolean>;
 }
 
 const UNKNOWN = "unknown";
@@ -103,31 +105,35 @@ export async function onLevel(handler: (level: number) => void): Promise<() => v
  * Speaks `text` with the endpoint's voice. When the endpoint has no speech route, or this is a plain browser,
  * it uses the browser voice if there is one. Otherwise the reply stays on screen and the handle is already done.
  */
-export async function speak(text: string): Promise<Speech> {
+export interface SpeechProgress {onStart?:()=>void;onProgress?:(characterOffset:number)=>void}
+export async function speak(text: string,progress:SpeechProgress={}): Promise<Speech> {
   const spoken = text.trim();
   if (!spoken) return silence();
-  if (!inTauri()) return hasBrowserVoice() ? speakInBrowser(spoken) : silence();
+  if (!inTauri()) return hasBrowserVoice() ? speakInBrowser(spoken,progress) : silence();
   const chunks = speechChunks(spoken);
-  const finished = deferred();
-  let stopped = false;
-  let current: Speech | null = null;
+  const finished = deferred<boolean>(),audible=deferred<boolean>();
+  let stopped = false,current:Speech|null=null,offset=0,complete=true;
+  const observe=(value:Speech)=>{void value.audible.then(heard=>{if(heard&&!stopped){audible.resolve(true);progress.onStart?.();}});};
   void (async () => {
     for (let i = 0; i < chunks.length && !stopped; i++) {
       try {
         const wav = await invoke<string>("voice_speak", { text: chunks[i] });
         if (stopped) break;
-        current = playWav(wav);
-        await current.done;
+        current = playWav(wav,fraction=>progress.onProgress?.(offset+chunks[i].length*fraction));
+        observe(current);
+        if(!await current.done)throw new Error("tts-unavailable");
+        offset+=chunks[i].length+1;
       } catch (error) {
+        complete=false;
         if (!stopped && ["tts-unsupported", "tts-unavailable"].includes(voiceCode(error)) && hasBrowserVoice()) {
-          current = speakInBrowser(chunks.slice(i).join(" "));
-          await current.done;
+          current = speakInBrowser(chunks.slice(i).join(" "),{onProgress:at=>progress.onProgress?.(offset+at)});
+          observe(current);complete=await current.done;
         }
         break;
       }
     }
-  })().catch(() => {}).finally(() => finished.resolve());
-  return { stop: () => { stopped = true; current?.stop(); finished.resolve(); }, done: finished.promise };
+  })().catch(() => {complete=false;}).finally(() => {audible.resolve(false);finished.resolve(complete&&!stopped);});
+  return {stop:()=>{stopped=true;current?.stop();audible.resolve(false);finished.resolve(false);},done:finished.promise,audible:audible.promise};
 }
 
 /** Stay below the native speech route's 1200-character cap without cutting off an explanation. */
@@ -148,59 +154,42 @@ export function speechChunks(text: string): string[] {
 }
 
 /** Plays a WAV that `voice_speak` sent as base64. Done resolves when it ends, fails or is stopped. */
-function playWav(encoded: string): Speech {
-  const url = URL.createObjectURL(new Blob([base64ToBytes(encoded)], { type: "audio/wav" }));
-  const audio = new Audio(url);
-  const finished = deferred();
-  let ended = false;
-  const end = () => {
-    if (ended) return;
-    ended = true;
-    URL.revokeObjectURL(url);
-    finished.resolve();
+function playWav(encoded:string,onProgress:(fraction:number)=>void):Speech {
+  const url=URL.createObjectURL(new Blob([base64ToBytes(encoded)],{type:"audio/wav"}));
+  const audio=new Audio(url),finished=deferred<boolean>(),audible=deferred<boolean>();
+  let ended=false;
+  const end=(complete:boolean)=>{if(ended)return;ended=true;audio.onplaying=null;audio.ontimeupdate=null;audio.onended=null;audio.onerror=null;URL.revokeObjectURL(url);audible.resolve(false);finished.resolve(complete);};
+  audio.onplaying=()=>audible.resolve(true);
+  // shortcut: WAV cues use proportional audio time; use forced alignment if word-level timing is required.
+  audio.ontimeupdate=()=>{if(Number.isFinite(audio.duration)&&audio.duration>0)onProgress(audio.currentTime/audio.duration);};
+  audio.onended=()=>{onProgress(1);end(true);};audio.onerror=()=>end(false);
+  audio.play().catch(()=>end(false));
+  return {stop:()=>{audio.pause();end(false);},done:finished.promise,audible:audible.promise};
+}
+
+/** Word boundaries drive the lesson when supported; elapsed time covers engines without them. */
+function speakInBrowser(text:string,progress:SpeechProgress={}):Speech {
+  const synth=window.speechSynthesis,finished=deferred<boolean>(),audible=deferred<boolean>();
+  const utterance=new SpeechSynthesisUtterance(text);
+  let timer:ReturnType<typeof setInterval>|undefined,last=0,ended=false;
+  const report=(at:number)=>{last=Math.max(last,Math.min(text.length,at));progress.onProgress?.(last);};
+  const end=(complete:boolean)=>{if(ended)return;ended=true;clearInterval(timer);utterance.onstart=null;utterance.onboundary=null;utterance.onend=null;utterance.onerror=null;audible.resolve(false);finished.resolve(complete);};
+  utterance.onstart=()=>{
+    audible.resolve(true);progress.onStart?.();
+    const started=performance.now(),duration=Math.max(1500,text.split(/\s+/).length*370);
+    timer=setInterval(()=>report(Math.round((performance.now()-started)/duration*text.length)),180);
   };
-  audio.onended = end;
-  audio.onerror = end;
-  audio.play().catch(end);
-  return {
-    stop: () => {
-      audio.pause();
-      end();
-    },
-    done: finished.promise,
-  };
+  utterance.onboundary=event=>{clearInterval(timer);report(event.charIndex);};
+  utterance.onend=()=>{report(text.length);end(true);};utterance.onerror=()=>end(false);
+  try{synth.speak(utterance);}catch{end(false);}
+  return {stop:()=>{end(false);synth.cancel();},done:finished.promise,audible:audible.promise};
 }
-
-/** Speaks with the browser voice. Done resolves when the utterance ends or fails. */
-function speakInBrowser(text: string): Speech {
-  const synth = window.speechSynthesis;
-  const finished = deferred();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.onend = () => finished.resolve();
-  utterance.onerror = () => finished.resolve();
-  synth.speak(utterance);
-  return {
-    stop: () => {
-      synth.cancel();
-      finished.resolve();
-    },
-    done: finished.promise,
-  };
+function hasBrowserVoice():boolean {
+  return typeof window!=="undefined"&&"speechSynthesis"in window&&window.speechSynthesis.getVoices().length>0;
 }
+function silence():Speech {return{stop:()=>{},done:Promise.resolve(false),audible:Promise.resolve(false)};}
 
-function hasBrowserVoice(): boolean {
-  return typeof window !== "undefined" && "speechSynthesis" in window;
-}
-
-function silence(): Speech {
-  return { stop: () => {}, done: Promise.resolve() };
-}
-
-/** A promise with its resolve function, so the stop and end paths can finish it. */
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve = () => {};
-  const promise = new Promise<void>((done) => {
-    resolve = () => done();
-  });
-  return { promise, resolve };
+/** Resolve once, including stop/error paths, so narration never waits on a dead audio source. */
+function deferred<T>():{promise:Promise<T>;resolve:(value:T)=>void} {
+  let resolve!:(value:T)=>void;const promise=new Promise<T>(done=>{resolve=done;});return{promise,resolve};
 }

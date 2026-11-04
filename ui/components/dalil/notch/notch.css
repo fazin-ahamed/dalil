@@ -6,6 +6,7 @@
 /* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 · weakest: S, a plain top bar by design; the hand-ink cards and the flight carry the identity */
 /* Hallmark · waive 7b · pure black notch matches the laptop bezel and hangs flush from the top edge · the notch must read as one object with the screen bezel */
 /* Hallmark · waive 47b · the notch is this product's own component with real controls inside, not a re-drawn OS window · notch panels and idle states carry live buttons */
+/* Hallmark · waive 26b · custom notch buttons are always enabled; imported BoardUI controls own disabled states · the notch remains interactive while its content and shape change */
 /* Notch motion helpers. Keyframes only; colours and sizes come from utilities in notch.tsx.
  * Every loop animates transform or opacity and is switched off for reduced motion. */
 

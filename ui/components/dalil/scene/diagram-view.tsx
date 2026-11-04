@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isShown } from "@/components/dalil/cards/draw";
 import { ROUGH, ROUGH_BLOB } from "@/components/dalil/cards/rough-filters";
-import { GRID_PAPER } from "@/components/dalil/setup/grid-paper";
 import type { DiagramScene, Tone } from "@/lib/contracts";
 import {
   layoutDiagram,
@@ -72,8 +71,6 @@ const CAPTION_OUT = "opacity-0 transition-opacity duration-150 ease-dalil-out";
 const LABEL_IN =
   "opacity-100 transition-opacity duration-300 delay-420 ease-dalil-out motion-reduce:delay-0 motion-reduce:duration-160";
 const LABEL_OUT = "opacity-0 transition-opacity duration-150 ease-dalil-out";
-const FOOT_IN = "opacity-100 transition-opacity duration-350 ease-dalil-out motion-reduce:duration-160";
-const FOOT_OUT = "opacity-0 transition-opacity duration-150 ease-dalil-out";
 
 /** Words on the paper: one <text> with a <tspan> per line, each centred on the block. */
 function Words({ block, className, halo = false }: { block: PlacedText; className?: string; halo?: boolean }) {
@@ -258,14 +255,11 @@ export function DiagramView({ scene, revealed, className, onDone }: DiagramViewP
   return (
     <figure
       className={cx(
-        "w-full max-w-190 overflow-hidden rounded-card bg-paper-2 font-sans text-ink shadow-card",
+        "w-full max-w-190 overflow-hidden bg-paper font-sans text-ink",
         className,
       )}
     >
-      <div aria-hidden="true" className="flex h-7 items-center justify-center border-b border-rule bg-paper px-4">
-        <span className="truncate text-caption-1-regular text-muted">{scene.title}</span>
-      </div>
-      <div style={GRID_PAPER}>
+      <div>
         <svg
           role="img"
           aria-label={label}
@@ -273,21 +267,10 @@ export function DiagramView({ scene, revealed, className, onDone }: DiagramViewP
           className="block h-auto w-full"
         >
           {layout.items.map((item, i) => (
-            <ItemMark key={`${i}-${item.kind}-${item.id}`} item={item} shown={isShown(count, i)} />
+            <g key={`${i}-${item.kind}-${item.id}`} data-teach-target={item.id}><ItemMark item={item} shown={isShown(count,i)}/></g>
           ))}
         </svg>
       </div>
-      {layout.footnote ? (
-        <div
-          aria-hidden="true"
-          className={cx(
-            "flex h-7 items-center justify-center border-t border-rule bg-paper px-4",
-            complete ? FOOT_IN : FOOT_OUT,
-          )}
-        >
-          <span className="truncate text-caption-1-regular text-muted">{layout.footnote}</span>
-        </div>
-      ) : null}
     </figure>
   );
 }

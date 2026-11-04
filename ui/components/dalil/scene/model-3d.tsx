@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { RiArrowLeftLine, RiArrowRightLine, RiRestartLine } from "@remixicon/react";
+import { RiRestartLine } from "@remixicon/react";
 import { Button } from "@/components/base/buttons/button";
 import type { Model3DScene, Part, Tone } from "@/lib/contracts";
 import {
@@ -13,7 +13,6 @@ import {
   boundsRadius,
   cameraDistance,
   DEFAULT_TWIST,
-  labelToken,
   orbitPosition,
   placeLabels,
   sceneBounds,
@@ -40,6 +39,8 @@ export interface Model3DViewProps {
   className?: string;
   /** How many labels show. Undefined reveals them one by one, 350 ms apart, after the model has assembled. */
   revealedLabels?: number;
+  activeLabel?:number|null;
+  revealedAngles?:string[];
   /** Called once the model is on screen, or straight away when WebGL is not available. */
   onReady?: () => void;
 }
@@ -185,8 +186,9 @@ function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer | null {
  * A labelled 3D model over the screen: a clay render on a transparent canvas, turning slowly,
  * with numbered pills pinned to its parts. The pills and leaders are DOM and SVG, placed every frame.
  */
-export function Model3DView({ scene, className, revealedLabels, onReady }: Model3DViewProps) {
+export function Model3DView({ scene, className, revealedLabels, onReady, activeLabel=null, revealedAngles }: Model3DViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const partAnchorRefs=useRef<(SVGCircleElement|null)[]>([]);
   const arcRefs=useRef<(SVGPathElement|null)[]>([]);
   const angleLeaderRefs=useRef<(SVGLineElement|null)[]>([]);
   const angleRefs=useRef<(SVGTextElement|null)[]>([]);
@@ -198,7 +200,7 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
   const [unsupported, setUnsupported] = useState(false);
   const [timed, setTimed] = useState<{ scene: Model3DScene; count: number } | null>(null);
   /** The tour: null is the overview, otherwise the index of the label being taught. */
-  const [step, setStep] = useState<number | null>(null);
+  const step=activeLabel;
   const [touched, setTouched] = useState(false);
   const focusRef = useRef<string | null>(null);
   const resetRef = useRef<() => void>(() => {});
@@ -303,7 +305,7 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
     /* What the person has changed by hand: tilt, zoom and a turn that stops the slow spin. */
     const view = { elevation: VIEW_ELEVATION, zoom: 1, driven: false };
     const placeCamera = () => {
-      const distance = cameraDistance(boundsRadius(bounds) * 0.72, FOV_DEG, camera.aspect) * view.zoom;
+      const distance = cameraDistance(boundsRadius(bounds) * 0.9, FOV_DEG, camera.aspect) * view.zoom;
       camera.position.set(...orbitPosition(distance, VIEW_AZIMUTH, view.elevation));
       camera.lookAt(0, 0, 0);
       camera.updateProjectionMatrix();
@@ -333,6 +335,10 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
       return { x: ((p.x + 1) / 2) * size.width, y: ((1 - p.y) / 2) * size.height };
     };
     const overlay = () => {
+      scene.parts.forEach((part,i)=>{
+        const node=nodes.get(part.id);if(!node)return;node.getWorldPosition(v);
+        const at=toScreen(v);partAnchorRefs.current[i]?.setAttribute("cx",String(at.x));partAnchorRefs.current[i]?.setAttribute("cy",String(at.y));
+      });
       const atomObstacles=scene.parts.filter(p=>p.shape==="sphere").map(part=>{
         const at=toScreen(v.set(...part.pos).applyMatrix4(offset.matrixWorld));
         const radius=part.shape==="sphere"?part.radius:0;
@@ -501,7 +507,7 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
       aria-label={unsupported ? undefined : ariaLabel}
       className={cx("relative isolate w-full min-h-64", className)}
     >
-      <div ref={hostRef} className="absolute inset-x-0 top-0 bottom-20 cursor-grab touch-none active:cursor-grabbing" />
+      <div ref={hostRef} className="absolute inset-0 cursor-grab touch-none active:cursor-grabbing" />
       {unsupported ? (
         <div className="relative flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
           <p className="text-body-regular text-text-secondary">3D view not available on this display</p>
@@ -515,10 +521,11 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
       ) : (
         <>
           <svg aria-hidden="true" className="pointer-events-none absolute inset-0 size-full overflow-visible">
-            {arcs.map((arc,i)=><g key={arc.id}>
+            {scene.parts.map((part,i)=><circle key={part.id} data-teach-target={part.id} ref={el=>{partAnchorRefs.current[i]=el;}} r={2} className="opacity-0"/>)}
+            {arcs.map((arc,i)=><g key={arc.id} className={cx("transition-opacity duration-200 motion-reduce:transition-none",revealedAngles&&!revealedAngles.includes(arc.id)?"opacity-0":"opacity-100")}>
               <path ref={el=>{arcRefs.current[i]=el;}} fill="none" strokeWidth={2.5} strokeLinecap="round" className="stroke-accent-600"/>
               <line ref={el=>{angleLeaderRefs.current[i]=el;}} strokeWidth={1} className="stroke-accent-600"/>
-              <text ref={el=>{angleRefs.current[i]=el;}} textAnchor="middle" dominantBaseline="middle" strokeWidth={5} paintOrder="stroke" className="stroke-paper fill-ink font-ink text-[23px] font-bold">{arc.degrees}°</text>
+              <text data-teach-target={arc.id} ref={el=>{angleRefs.current[i]=el;}} textAnchor="middle" dominantBaseline="middle" strokeWidth={5} paintOrder="stroke" className="stroke-paper fill-ink font-ink text-[23px] font-bold">{arc.degrees}°</text>
             </g>)}
             {ordered.map((label, i) => (
               <g
@@ -526,7 +533,6 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
                 className={cx(
                   "transition-opacity duration-240 ease-dalil-out motion-reduce:duration-0",
                   i >= shown ? "opacity-0" : step === null || step === i ? "opacity-100" : "opacity-40",
-                  step === i && "scale-110",
                 )}
               >
                 <line
@@ -541,7 +547,8 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
                   ref={(el) => {
                     dotRefs.current[i] = el;
                   }}
-                  r={5}
+                  data-teach-target={typeof label.target === "string" ? label.target : undefined}
+                  r={4}
                   strokeWidth={2}
                   style={{ fill: "var(--color-text-white)", stroke: "var(--color-ink)" }}
                 />
@@ -558,78 +565,17 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
             >
               <span
                 className={cx(
-                  "inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 font-ink text-[20px] leading-none font-bold whitespace-nowrap text-ink shadow-card transition-opacity duration-240 ease-dalil-out motion-reduce:duration-0",
-                  i % 2 === 0 ? "-rotate-[1.5deg]" : "rotate-[1deg]",
+                  "inline-flex items-center rounded-full border border-rule bg-paper-2/95 px-2.5 py-1 text-caption-1-medium whitespace-nowrap text-ink transition-opacity duration-200 ease-dalil-out motion-reduce:duration-0",
                   i < shown ? "opacity-100" : "opacity-0",
                 )}
-                style={{ backgroundColor: `var(${labelToken(i, label.tone)})` }}
               >
-                <span>{label.n}</span>
-                <span aria-hidden="true">·</span>
                 <span>{label.text}</span>
               </span>
             </div>
           ))}
-          <CaptionBar scene={scene} ordered={ordered} step={step} setStep={setStep} touched={touched} onReset={() => resetRef.current()} />
+          {touched && <Button iconOnly size="small" variant="secondary" leadingIcon={RiRestartLine} aria-label="Reset the view" onClick={()=>resetRef.current()} className="absolute end-3 top-3"/>}
         </>
       )}
-    </div>
-  );
-}
-
-/** The lesson under the model: the overview, then each label with its caption, Back and Next. */
-function CaptionBar({
-  scene,
-  ordered,
-  step,
-  setStep,
-  touched,
-  onReset,
-}: {
-  scene: Model3DScene;
-  ordered: Model3DScene["labels"];
-  step: number | null;
-  setStep: (step: number | null) => void;
-  touched: boolean;
-  onReset: () => void;
-}) {
-  const current = step === null ? null : ordered[step];
-  const last = ordered.length - 1;
-  const heading = current ? `${current.n} · ${current.text}` : scene.title;
-  const body = current ? current.caption : (scene.intro ?? "Drag to turn it, scroll to zoom. Press Start to go through the parts.");
-  return (
-    <div
-      className="pointer-events-auto absolute inset-x-3 bottom-3 flex items-center gap-3 rounded-2xl border border-separator-border bg-background-primary-default px-3.5 py-2.5 shadow-card"
-      onPointerDown={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
-    >
-      <div className="min-w-0 flex-1" aria-live="polite">
-        <p className="text-headline-medium text-text-primary">{heading}</p>
-        {body && <p className="text-body-regular text-text-secondary">{body}</p>}
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        {touched && (
-          <Button size="small" variant="secondary" leadingIcon={RiRestartLine} aria-label="Reset the view" onClick={onReset} />
-        )}
-        {ordered.length > 0 && step !== null && (
-          <Button
-            size="small"
-            variant="secondary"
-            leadingIcon={RiArrowLeftLine}
-            aria-label="Previous part"
-            onClick={() => setStep(step === 0 ? null : step - 1)}
-          />
-        )}
-        {ordered.length > 0 && (
-          <Button
-            size="small"
-            trailingIcon={step === last ? undefined : RiArrowRightLine}
-            onClick={() => setStep(step === null ? 0 : step === last ? null : step + 1)}
-          >
-            {step === null ? "Start" : step === last ? "Done" : "Next"}
-          </Button>
-        )}
-      </div>
     </div>
   );
 }

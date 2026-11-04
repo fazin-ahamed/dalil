@@ -171,6 +171,10 @@ export interface Model3DScene {
 
 export type Scene = DiagramScene | Model3DScene;
 
+/** One spoken thought, optionally pointing to a part or diagram item. */
+export interface TeachingBeat { text: string; target?: string }
+
+
 /** Coordinates use the captured screen, 0 to 1000 from its top-left. */
 export type ScreenAnnotation =
   | { kind: "pen"; points: [number, number][]; tone?: Tone }
@@ -184,8 +188,10 @@ export type OverlayCommand =
   | { kind: "annotations"; annotations: ScreenAnnotation[]; screen?: ScreenBounds }
   | { kind: "card"; title: string; lines: string[] }
   /** A drawing: a hand-drawn note or a labelled 3D model. Replaces any scene already showing. */
-  | { kind: "scene"; scene: Scene; text?: string }
-  | { kind: "point"; x: number; y: number; label?: string }
+  | { kind: "scene"; scene: Scene; text?: string; lesson?: TeachingBeat[] }
+  | { kind: "lesson"; beats: TeachingBeat[] }
+  | { kind: "stop-teaching" }
+  | { kind: "point"; x: number; y: number; label?: string; duration?: number }
   | { kind: "clear" };
 
 /** What Dalil can tell about the moment: the focused app and window title. No screen pixels. */
@@ -214,6 +220,7 @@ export interface TutorReply {
   /** Labelled points on the screen to point at, in order. Empty when nothing on screen is relevant. */
   marks: Mark[];
   annotations?: ScreenAnnotation[];
+  lesson?: TeachingBeat[];
   /** A drawing to show while explaining: a hand-drawn note or a labelled 3D model. Null for a plain answer. */
   scene?: Scene | null;
   /** A topic name worth remembering, or null. */

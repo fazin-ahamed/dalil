@@ -9,14 +9,11 @@ import { LibraryPanel } from "@/components/dalil/notch/library-panel";
 import { SetupPanel } from "@/components/dalil/setup/setup-panel";
 import { useEndpointSetup } from "@/components/dalil/setup/use-endpoint-setup";
 import { desktopShortcuts, onShortcutsChanged, type DesktopShortcut, inputMode, isTauri, loadEndpoint, onCommand, onEndpointChanged, onWindowBlur, saveEndpoint, setInputRect, setInteractive, setKeyboard } from "@/lib/native-bridge";
-import { cx } from "@/utils/cx";
 
 const HOVER_OPEN_MS = 200;
 const HOVER_CLOSE_MS = 700;
 const IDLE_MS = 10_000;
-const COMPACT_MS = 1000;
 const STAGE_HEIGHT = 640;
-const WAKE = { left: (NOTCH_STAGE.w - 132) / 2, w: 132, h: 8, y: 0 };
 interface PointerPayload { inside: boolean; x: number; y: number }
 
 async function readUserName(): Promise<string> {
@@ -25,32 +22,29 @@ async function readUserName(): Promise<string> {
   return invoke<string>("user_name");
 }
 
-/** Hidden notch leaves a small top-edge target; hovering it or using --ask brings it back. */
+/** Idle and dismissal collapse to a persistent small island. */
 export default function NotchWindow() {
   const [view, setView] = useState<"rest" | "home" | "setup" | "projects" | "receipts" | TutorView>("rest");
-  const [visibility, setVisibility] = useState<"visible" | "compact" | "hidden">("visible");
-  const hidden = visibility === "hidden";
+  const [visibility, setVisibility] = useState<"visible" | "compact">("visible");
   const [shortcuts, setShortcuts] = useState<DesktopShortcut[]>([]);
   const [endpoint, setEndpoint] = useState<NotchEndpoint | undefined>();
   const [name, setName] = useState("there");
   const [region, setRegion] = useState(false);
   const viewRef = useRef(view);
-  const hiddenRef = useRef(hidden);
   const visibilityRef = useRef(visibility);
   const regionRef = useRef(region);
-  const rectRef = useRef({ left: WAKE.left, w: 132, h: 30, y: 0 });
+  const rectRef = useRef({ left: (NOTCH_STAGE.w - 132) / 2, w: 132, h: 30, y: 0 });
   const lastPointer = useRef<PointerPayload | null>(null);
   const overRef = useRef(false);
   const suppressWake = useRef(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const host = useRef<HTMLDivElement>(null);
   const tutor = useTutor(setView);
-  const { openAsk, close: closeTutor, toggleTalk, submit, stopComputer } = tutor;
+  const { openAsk, close: closeTutor, toggleTalk, submit, stopComputer, stopTeaching } = tutor;
 
-  useEffect(() => { viewRef.current = view; hiddenRef.current = hidden; visibilityRef.current = visibility; regionRef.current = region; });
-  useEffect(() => () => { clearTimeout(hideTimer.current); clearTimeout(hoverTimer.current); }, []);
+  useEffect(() => { viewRef.current = view; visibilityRef.current = visibility; regionRef.current = region; });
+  useEffect(() => () => { clearTimeout(hoverTimer.current); }, []);
   const hide = useCallback((explicit = true) => {
     clearTimeout(hoverTimer.current);
     clearTimeout(idleTimer.current);
@@ -60,25 +54,18 @@ export default function NotchWindow() {
     setVisibility("compact");
     closeTutor();
     void setKeyboard(false);
-    hideTimer.current = setTimeout(() => {
-      visibilityRef.current = "hidden";
-      hiddenRef.current = true;
-      setVisibility("hidden");
-    }, COMPACT_MS);
   }, [closeTutor]);
   const reveal = useCallback(() => {
-    clearTimeout(hideTimer.current);
     clearTimeout(hoverTimer.current);
     suppressWake.current = false;
     overRef.current = false;
-    hiddenRef.current = false;
     visibilityRef.current = "visible";
     setVisibility("visible");
   }, []);
   const resetIdle = useCallback(() => {
     clearTimeout(idleTimer.current);
-    if (visibilityRef.current === "visible" && viewRef.current !== "listen" && !tutor.speaking && !tutor.busy) idleTimer.current = setTimeout(() => hide(false), IDLE_MS);
-  }, [hide, tutor.speaking, tutor.busy]);
+    if (visibilityRef.current === "visible" && viewRef.current !== "listen" && !tutor.busy) idleTimer.current = setTimeout(() => hide(false), IDLE_MS);
+  }, [hide, tutor.busy]);
 
   useEffect(() => {
     resetIdle();
@@ -105,7 +92,7 @@ export default function NotchWindow() {
   }, []);
 
   const applyInput = useCallback(() => {
-    const rect = hiddenRef.current ? WAKE : rectRef.current;
+    const rect = rectRef.current;
     if (regionRef.current) void setInputRect(rect.left, rect.y, rect.w, rect.h);
     const p = lastPointer.current;
     if (p) {
@@ -120,12 +107,12 @@ export default function NotchWindow() {
   }, [applyInput]);
   useEffect(() => {
     applyInput();
-  }, [region, hidden, applyInput]);
+  }, [region, applyInput]);
   useEffect(() => { void setKeyboard(visibility === "visible" && (view === "setup" || view === "ask" || view === "listen" || view === "projects" || view === "receipts")); }, [visibility, view]);
 
   const pointerMoved = useCallback((p: PointerPayload) => {
     lastPointer.current = p;
-    const { left, w, h, y } = hiddenRef.current ? WAKE : rectRef.current;
+    const { left, w, h, y } = rectRef.current;
     const over = p.inside && p.x >= left && p.x <= left + w && p.y >= y && p.y <= y + h;
     if (!over) suppressWake.current = false;
     if (over && visibilityRef.current !== "visible" && !suppressWake.current) reveal();
@@ -155,7 +142,7 @@ export default function NotchWindow() {
     const onLeave = () => { if (!isTauri()) pointerMoved({ inside: false, x: -1, y: -1 }); };
     const onPress = (event: PointerEvent) => {
       if (viewRef.current === "thinking") return;
-      const { left, w, h, y: top } = hiddenRef.current ? WAKE : rectRef.current;
+      const { left, w, h, y: top } = rectRef.current;
       const bounds = host.current?.getBoundingClientRect();
       const x = event.clientX - (bounds?.left ?? 0);
       const y = event.clientY - (bounds?.top ?? 0);
@@ -201,7 +188,7 @@ export default function NotchWindow() {
     let off = () => {};
     void onCommand((command) => {
       clearTimeout(hoverTimer.current);
-      if (command === "hide") { void stopComputer(); hide(); return; }
+      if (command === "hide") { void stopComputer(); stopTeaching(); hide(); return; }
       if (command === "toggle" && visibilityRef.current === "visible" && viewRef.current !== "rest") { hide(); return; }
       reveal();
       if (command === "ask" || command === "toggle") void openAsk();
@@ -209,7 +196,7 @@ export default function NotchWindow() {
       if (command === "setup") void openSetup();
     }).then((fn) => alive ? (off = fn) : fn());
     return () => { alive = false; off(); };
-  }, [hide, openAsk, openSetup, reveal, stopComputer, toggleTalk]);
+  }, [hide, openAsk, openSetup, reveal, stopComputer, stopTeaching, toggleTalk]);
 
   const onAction = useCallback((action: NotchAction) => {
     if (action === "dismiss") { hide(); return; }
@@ -230,10 +217,8 @@ export default function NotchWindow() {
     shortcutHint: shortcuts.length ? "Ctrl + Alt + Space to ask. I’ll take it from here." : "Ask a question. I’ll bring the explanation to your screen.",
     setupPanel: view === "projects" || view === "receipts" ? <LibraryPanel kind={view} onBack={()=>setView("home")} onProjectChanged={()=>void tutor.refresh()}/> : <SetupPanel model={model} actions={setupActions} />, working: tutor.tasks.filter((task) => task.status === "running").length };
   const using = [tutor.contextLabel && `Using ${tutor.contextLabel}`, tutor.project && `Project ${tutor.project.name}`].filter(Boolean).join(". ");
-  return <div ref={host} className="relative mx-auto" style={{ width: NOTCH_STAGE.w }} data-notch-hidden={hidden} data-notch-phase={visibility}>
-    {hidden && <button type="button" aria-label="Open Dalil" onPointerEnter={() => { if (!suppressWake.current) reveal(); }} onFocus={reveal} onClick={() => { reveal(); openAsk(); }}
-      className="absolute top-0 z-10 h-2 w-33 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring" style={{ left: WAKE.left }} />}
-    <div inert={hidden} aria-hidden={hidden} className={cx("origin-top transition-[opacity,transform] duration-260 ease-dalil-out motion-reduce:transform-none motion-reduce:duration-100", hidden ? "pointer-events-none -translate-y-1 scale-75 opacity-0" : "translate-y-0 scale-100 opacity-100")}>
+  return <div ref={host} className="relative mx-auto" style={{ width: NOTCH_STAGE.w }} data-notch-hidden={false} data-notch-phase={visibility}>
+    <div>
       {view === "listen" ? <Notch state="listening" transcript="" level={tutor.level} {...common} />
         : view === "ask" ? <Notch state="ask" draft={tutor.draft} onDraft={tutor.setDraft} onSubmit={(value) => void submit(value)} busy={tutor.busy}
           messages={tutor.messages} tasks={tutor.tasks} error={tutor.error} contextLabel={using || undefined}

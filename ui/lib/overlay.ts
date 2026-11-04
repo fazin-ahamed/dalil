@@ -21,7 +21,7 @@ export async function sendOverlay(cmd: OverlayCommand, screen?: ScreenBounds): P
   const current = ++revision;
   const { invoke } = await import("@tauri-apps/api/core");
   const { emitTo } = await import("@tauri-apps/api/event");
-  if (cmd.kind !== "clear") await invoke("overlay_show", { screen: screen ?? ("screen" in cmd ? cmd.screen : undefined) ?? null });
+  if (cmd.kind !== "clear" && cmd.kind !== "stop-teaching") await invoke("overlay_show", { screen: screen ?? ("screen" in cmd ? cmd.screen : undefined) ?? null });
   await emitTo("overlay", "dalil://overlay", cmd);
   if (cmd.kind === "clear") {
     await new Promise((resolve) => setTimeout(resolve, HIDE_AFTER_CLEAR_MS));

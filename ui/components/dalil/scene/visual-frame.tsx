@@ -1,31 +1,20 @@
 "use client";
 
+import "./teaching.css";
+
 import type { ReactNode, PointerEventHandler, KeyboardEventHandler } from "react";
-import { RiCloseLine, RiDragMove2Line } from "@remixicon/react";
+import { RiCloseLine, RiDragMove2Line, RiRestartLine } from "@remixicon/react";
+import { IconButton } from "@/components/base/buttons/icon-button";
 import { Button } from "@/components/base/buttons/button";
 import { cx } from "@/utils/cx";
 
-/** The red window button: a plain dot that shows its cross on hover or focus, like a Mac window. */
-export function CloseDot({ label, onClose, className }: { label: string; onClose: () => void; className?: string }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onClose}
-      className={cx(
-        "group/close pointer-events-auto relative grid size-3.5 shrink-0 place-items-center rounded-full bg-mark-error outline-none before:absolute before:-inset-1.5 before:content-[''] focus-visible:ring-2 focus-visible:ring-border-focus-ring focus-visible:ring-offset-1 focus-visible:ring-offset-paper",
-        className,
-      )}
-    >
-      <RiCloseLine
-        aria-hidden
-        className="size-2.5 text-text-white opacity-0 transition-opacity duration-120 group-hover/close:opacity-100 group-focus-visible/close:opacity-100"
-      />
-    </button>
-  );
+/** Small close control; the teaching content carries the hierarchy. */
+export function CloseDot({label,onClose,className}:{label:string;onClose:()=>void;className?:string}) {
+  return <IconButton icon={RiCloseLine} size="small" aria-label={label} onClick={onClose}
+    className={cx("border-transparent bg-transparent text-text-secondary shadow-none hover:bg-background-secondary-default active:scale-95",className)}/>;
 }
 
-/** A window for what Dalil draws: the red dot at the top left closes it, the title sits in the middle. */
+/** A quiet, movable frame; only its title and direct controls sit above the visual. */
 export function VisualFrame({
   title,
   onClose,
@@ -33,6 +22,7 @@ export function VisualFrame({
   className,
   onMoveStart,
   onMoveKey,
+  onReplay,
 }: {
   title: string;
   onClose: () => void;
@@ -40,19 +30,21 @@ export function VisualFrame({
   className?: string;
   onMoveStart?: PointerEventHandler<HTMLButtonElement>;
   onMoveKey?: KeyboardEventHandler<HTMLButtonElement>;
+  onReplay?:()=>void;
 }) {
   return (
     <section
       aria-label={title}
-      className={cx("pointer-events-auto overflow-hidden rounded-2xl border border-rule-strong bg-paper shadow-card", className)}
+      className={cx("dalil-teaching-frame pointer-events-auto overflow-hidden rounded-2xl border border-rule bg-paper shadow-card", className)}
     >
-      <header className="relative flex h-9 items-center border-b border-rule bg-paper-2 px-3.5">
-        <CloseDot label={`Close ${title}`} onClose={onClose} />
+      <header className="dalil-teaching-toolbar relative flex h-10 items-center gap-1 px-2">
         {onMoveStart ? <Button variant="ghost" size="small" leadingIcon={RiDragMove2Line}
-          aria-label={`Move ${title}; use arrow keys to reposition`} onPointerDown={(event) => { event.currentTarget.focus({ preventScroll: true }); onMoveStart(event); }} onKeyDown={onMoveKey}
-          className="absolute inset-x-10 h-full cursor-grab touch-none justify-center rounded-none bg-transparent text-caption-1-medium text-text-secondary active:cursor-grabbing">
+          aria-label={`Move ${title}; use arrow keys to reposition`} onPointerDown={(event)=>{event.currentTarget.focus({preventScroll:true});onMoveStart(event);}} onKeyDown={onMoveKey}
+          className="h-full min-w-0 flex-1 cursor-grab touch-none justify-start rounded-lg bg-transparent text-caption-1-medium text-text-secondary hover:bg-transparent active:bg-transparent active:cursor-grabbing">
           <span className="truncate">{title}</span>
-        </Button> : <span className="pointer-events-none absolute inset-x-12 truncate text-center text-caption-1-medium text-text-secondary">{title}</span>}
+        </Button> : <span className="min-w-0 flex-1 truncate px-2 text-caption-1-medium text-text-secondary">{title}</span>}
+        {onReplay && <IconButton icon={RiRestartLine} size="small" aria-label="Replay explanation" onClick={onReplay} className="border-transparent bg-transparent text-text-secondary shadow-none hover:bg-background-secondary-default active:scale-95"/>}
+        <CloseDot label={`Close ${title}`} onClose={onClose}/>
       </header>
       {children}
     </section>

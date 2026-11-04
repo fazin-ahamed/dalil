@@ -58,7 +58,7 @@ Anchored to the top centre of the primary display, flush with the screen edge (n
 
 | State | Size (w × min h, logical px) | Content | Entered by | Leaves on |
 |---|---|---|---|---|
-| Rest | 132 × 30 | The Dalil mark, 14px, centred. Optional: hide when idle (setting). | Default | Hover 200 ms, click, tap of the hotkey |
+| Rest | 132 × 30 | The Dalil mark, 14px, centred. Collapses to a persistent small island after 10 s idle, Esc or clicking outside. | Default | Hover 200 ms, click, tap of the hotkey |
 | Home | 536 × 184 | Greeting, one hint line with keycaps, gear, receipts, endpoint chip | Hover, click, hotkey tap | Esc, click outside, 6 s of no pointer |
 | Listening | 300 × 64 | Live waveform (7 bars), live transcript, 1 line | Hotkey down | Hotkey up |
 | Thinking | 240 × 46 | Three-bar shimmer, "Reading your screen" | Hotkey up with a transcript | First step parsed |
@@ -106,7 +106,7 @@ Anatomy and rules:
 
 ### 6.4 Caption
 
-Every spoken line also appears as text in the notch's Guiding state. The caption is the accessible equivalent of the voice and is never optional.
+The Windows teacher uses short, paced subtitles at the bottom of the screen on translucent black when speech is unavailable. Captions have pause and dismiss controls; full text remains in chat. During speech, the visual and custom pointer carry the lesson without an extra transcript panel. Visuals start automatically, with replay available in their small title bar. The tiny idle notch stays visible.
 
 ## 7. Setup: one custom endpoint
 

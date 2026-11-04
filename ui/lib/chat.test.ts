@@ -140,7 +140,7 @@ describe("buildMessages", () => {
     assert.equal(system.role, "system");
     assert.ok(
       textOf(system).includes(
-        '{"text": string, "steps": string[], "marks": [{"n": number, "label": string, "x": number, "y": number, "note": string}], "scene": object|null, "topic": string|null, "kind": "learned"|"struggled"|"asked"}',
+        '{"text": string, "steps": string[], "marks": [{"n": number, "label": string, "x": number, "y": number, "note": string}], "scene": object|null, "lesson": [{"text": string, "target": string}], "topic": string|null, "kind": "learned"|"struggled"|"asked"}',
       ),
     );
     assert.match(textOf(system), /JSON only/);

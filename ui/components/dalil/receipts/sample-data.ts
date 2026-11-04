@@ -1,10 +1,12 @@
 /** Sample receipt rows for the design system. Every row is illustrative and labelled Sample in the UI. */
 
-export type ReceiptIncluded = "question" | "controls" | "screenshot";
+export type ReceiptIncluded = "question" | "controls" | "screenshot" | "context";
 export type RedactionType = "card number" | "email" | "phone";
 
 export interface ReceiptRow {
   id: string;
+  createdAt?: string;
+  model?: string;
   /** 24 hour local time, HH:MM. */
   time: string;
   host: string;

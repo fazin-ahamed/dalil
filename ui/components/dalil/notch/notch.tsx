@@ -10,6 +10,8 @@ import {
   RiCursorLine,
   RiErrorWarningLine,
   RiGlobalLine,
+  RiFolderLine,
+  RiStopCircleLine,
   RiMacbookLine,
   RiMicLine,
   RiReceiptLine,
@@ -52,7 +54,7 @@ export interface ChatBubble {
   scene?: Scene | null;
 }
 
-export type NotchAction = "open-setup" | "open-ask" | "open-talk" | "open-receipts" | "dismiss" | "skip" | "retry";
+export type NotchAction = "open-setup" | "open-ask" | "open-talk" | "open-receipts" | "open-projects" | "stop-task" | "dismiss" | "skip" | "retry";
 
 export interface NotchEndpoint {
   model: string;
@@ -75,6 +77,8 @@ interface NotchCommon {
   working?: number;
   compact?: boolean;
   shortcutHint?: string;
+  projectName?: string;
+  thinkingText?: string;
 }
 
 export type NotchProps = NotchCommon &
@@ -103,9 +107,9 @@ export type NotchProps = NotchCommon &
 /** Logical size of each state in pixels. Guiding, waiting, correcting, error and ask grow with their text. */
 export const NOTCH_SHAPES: Record<NotchState, { w: number; h: number }> = {
   rest: { w: 132, h: 30 },
-  home: { w: 536, h: 184 },
+  home: { w: 536, h: 220 },
   listening: { w: 300, h: 64 },
-  thinking: { w: 240, h: 46 },
+  thinking: { w: 400, h: 56 },
   guiding: { w: 440, h: 96 },
   waiting: { w: 440, h: 96 },
   correcting: { w: 440, h: 104 },
@@ -401,7 +405,7 @@ export function Notch(props: NotchProps) {
           </Layer>
 
           <Layer active={active === "home"} reduced={reduced}>
-            <HomeLayer data={home} onAction={fire} active={active === "home"} shortcutHint={shortcutHint} />
+            <HomeLayer data={home} onAction={fire} active={active === "home"} shortcutHint={shortcutHint} projectName={props.projectName} />
           </Layer>
 
           <Layer active={active === "listening"} reduced={reduced}>
@@ -409,7 +413,7 @@ export function Notch(props: NotchProps) {
           </Layer>
 
           <Layer active={active === "thinking"} reduced={reduced}>
-            <ThinkingLayer live={active === "thinking" && !reduced} />
+            <ThinkingLayer live={active === "thinking" && !reduced} text={props.thinkingText} onOpen={()=>fire("open-ask")} onStop={()=>fire("stop-task")} />
           </Layer>
 
           <Layer active={active === "guide"} reduced={reduced}>
@@ -504,21 +508,24 @@ function HomeLayer({
   onAction,
   active,
   shortcutHint,
+  projectName,
 }: {
   data: HomeData;
   onAction: (a: NotchAction) => void;
   active: boolean;
   shortcutHint?: string;
+  projectName?: string;
 }) {
   const part = dayPartForHour(data.hour);
   const greeting = fill(copy.notch.home.greeting[part], { name: data.name });
   const endpoint = data.endpoint;
 
   return (
-    <div className="flex h-46 w-134 flex-col px-4 pt-4 pb-5">
+    <div className="flex h-55 w-134 flex-col px-5 pt-4 pb-5">
       <div className="flex h-9 items-center justify-between gap-3">
         {endpoint ? <EndpointChip endpoint={endpoint} /> : <span />}
         <div className="flex items-center gap-2">
+          <HintIconButton icon={RiFolderLine} label="Projects" active={active} onPress={()=>onAction("open-projects")} />
           <HintIconButton
             icon={RiReceiptLine}
             label={copy.aria.icon_buttons.receipts}
@@ -539,6 +546,7 @@ function HomeLayer({
         {endpoint ? (
           <>
             <Hint text={shortcutHint ?? copy.notch.home.hint_bind} />
+            <Button size="xs" variant="ghost" leadingIcon={RiFolderLine} onClick={()=>onAction("open-projects")} className="text-notch-muted">{projectName ? `Working in ${projectName}` : "Choose a project"}</Button>
             <div className="mt-1.5 flex items-center gap-2">
               <Button size="medium" leadingIcon={RiMicLine} className={FOCUS_ON_NOTCH} onClick={() => onAction("open-talk")}>
                 {copy.notch.home.talk_button}
@@ -716,13 +724,15 @@ function ShimmerBars({ live }: { live: boolean }) {
   );
 }
 
-function ThinkingLayer({ live }: { live: boolean }) {
-  return (
-    <div className="flex h-11.5 w-60 items-center justify-center gap-3">
-      <ShimmerBars live={live} />
-      <span className="text-body-medium text-notch-ink">{copy.notch.thinking.label}</span>
-    </div>
-  );
+function ThinkingLayer({live,text,onOpen,onStop}:{live:boolean;text?:string;onOpen:()=>void;onStop:()=>void}) {
+  return <div className="pointer-events-auto flex h-14 w-100 items-center gap-3 px-4" role="status" aria-live="polite">
+    <ShimmerBars live={live}/>
+    <button type="button" onClick={onOpen} aria-label="Open task conversation" className="min-w-0 flex-1 rounded-lg py-2 text-start focus-visible:outline-2 focus-visible:outline-border-focus-ring">
+      <span className="block truncate text-body-medium text-notch-ink">{text??copy.notch.thinking.label}</span>
+      <span className="block text-caption-1-medium text-notch-muted">Working on your request</span>
+    </button>
+    <IconButton icon={RiStopCircleLine} size="small" aria-label="Stop current task" onClick={onStop} className="border-transparent bg-transparent text-notch-muted shadow-none hover:bg-notch-raised-2"/>
+  </div>;
 }
 
 /* Guiding and waiting share one layer, so a step that starts waiting does not re-fade its text. */

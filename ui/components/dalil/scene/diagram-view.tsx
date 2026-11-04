@@ -194,6 +194,11 @@ function ItemMark({ item, shown }: { item: ItemLayout; shown: boolean }) {
       return <ArrowMark item={item} shown={shown} />;
     case "highlight":
       return <HighlightMark item={item} shown={shown} />;
+    case "geometry":
+      return <g>
+        <path d={item.path} fill="none" pathLength={1} strokeDasharray="1 1" strokeWidth={2} strokeLinecap="round" className={cx(TONE[item.tone].edge,shown?OUTLINE_IN:OUTLINE_OUT)}/>
+        {item.label && <g className={shown?TEXT_IN:TEXT_OUT}><Words block={item.label} className="fill-ink" halo/></g>}
+      </g>;
     default:
       return null;
   }

@@ -30,6 +30,8 @@ pub fn setup(app: &AppHandle) {
         return;
     };
     let _ = window.set_focusable(false);
+    #[cfg(windows)]
+    super::desktop::exclude_from_capture(&window);
     #[cfg(target_os = "linux")]
     if super::LAYER_SHELL.load(std::sync::atomic::Ordering::Relaxed) && layer_shell(&window) {
         return;
@@ -85,8 +87,16 @@ fn layer_shell(window: &tauri::WebviewWindow) -> bool {
 
 /// Shows the overlay on top of the desktop. Its page draws whatever the notch sent last.
 #[tauri::command]
-pub fn overlay_show(app: AppHandle) -> Result<(), String> {
+pub fn overlay_show(app: AppHandle, screen: Option<crate::computer::ScreenBounds>) -> Result<(), String> {
     let window = app.get_webview_window(LABEL).ok_or("overlay-missing")?;
+    if let Some(screen) = screen {
+        let monitor = window.available_monitors().map_err(|_| "computer-display-unavailable")?.into_iter().find(|monitor| {
+            let p = monitor.position(); let s = monitor.size();
+            screen.x == p.x && screen.y == p.y && screen.width == s.width as i32 && screen.height == s.height as i32
+        }).ok_or("computer-display-unavailable")?;
+        window.set_position(*monitor.position()).map_err(|_| "overlay-unavailable")?;
+        window.set_size(*monitor.size()).map_err(|_| "overlay-unavailable")?;
+    }
     window.show().map_err(|e| e.to_string())
 }
 

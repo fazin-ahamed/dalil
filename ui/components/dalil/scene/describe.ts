@@ -31,6 +31,10 @@ export function describeDiagram(scene: DiagramScene): string {
       case "arrow":
         parts.push(sentence(`Arrow from ${name(item.from)} to ${name(item.to)}${item.label ? `, ${item.label}` : ""}`));
         break;
+      case "line":
+      case "angle":
+        parts.push(sentence(`${item.kind === "angle" ? "Angle" : "Line"}${item.label ? `: ${item.label}` : ""}`));
+        break;
       case "highlight":
         parts.push(sentence(`Highlighted: ${name(item.target)}`));
         break;

@@ -105,3 +105,11 @@ mod tests {
         assert_eq!(shortcut_command(usize::MAX), None);
     }
 }
+
+#[cfg(windows)]
+pub(crate) fn exclude_from_capture(window: &tauri::WebviewWindow) {
+    if let Ok(handle) = window.hwnd() {
+        // Dalil's teaching UI must not become the screen the tutor tries to explain or click.
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetWindowDisplayAffinity(handle.0 as _, 0x11); }
+    }
+}

@@ -48,12 +48,14 @@ const INCLUDED_LABEL: Record<ReceiptIncluded, string> = {
   question: copy.receipts.included.question,
   controls: LOCAL.controls,
   screenshot: copy.receipts.included.screenshot,
+  context: "Text context",
 };
 
 const INCLUDED_LONG: Record<ReceiptIncluded, string> = {
   question: copy.receipts.included.question,
   controls: LOCAL.controlsLong,
   screenshot: copy.receipts.included.screenshot,
+  context: "Text context",
 };
 
 /** Grows the 32px ghost button to a 44px hit area without changing how it looks. */
@@ -136,6 +138,7 @@ function DetailList({ row }: { row: ReceiptRow }) {
           </span>
         </dd>
       </div>
+      {row.model && <div className="min-w-0"><dt className="text-body-2-medium text-text-tertiary">Model</dt><dd className="mt-1 break-words text-body-regular text-text-primary">{row.model}</dd></div>}
       <div className="min-w-0">
         <dt className="text-body-2-medium text-text-tertiary">{LOCAL.categories}</dt>
         <dd className="mt-1 text-body-regular text-text-primary">
@@ -161,10 +164,11 @@ export interface ReceiptsPanelProps {
   /** Row ids that start expanded. */
   defaultExpanded?: string[];
   className?: string;
+  sample?: boolean;
 }
 
 /** The Receipts surface: what left this computer, one row per request. */
-export function ReceiptsPanel({ rows, host, defaultExpanded = [], className }: ReceiptsPanelProps) {
+export function ReceiptsPanel({ rows, host, defaultExpanded = [], className, sample = true }: ReceiptsPanelProps) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(defaultExpanded));
   const [flash, setFlash] = useFlash();
 
@@ -179,9 +183,11 @@ export function ReceiptsPanel({ rows, host, defaultExpanded = [], className }: R
   const asJson = () =>
     JSON.stringify(
       {
-        sample: true,
+        sample,
         requests: rows.map((r) => ({
           time: r.time,
+          createdAt:r.createdAt,
+          model:r.model,
           host: r.host,
           included: r.included.map((i) => INCLUDED_LONG[i]),
           sizeKb: r.sizeKb,
@@ -201,9 +207,7 @@ export function ReceiptsPanel({ rows, host, defaultExpanded = [], className }: R
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <h2 className="flex min-h-9 items-center gap-2 text-headline-semibold text-text-primary">
             {copy.receipts.title}
-            <Chip variant="caption" color="soft">
-              {LOCAL.sample}
-            </Chip>
+            {sample && <Chip variant="caption" color="soft">{LOCAL.sample}</Chip>}
           </h2>
           <Button
             variant="secondary"
@@ -224,7 +228,7 @@ export function ReceiptsPanel({ rows, host, defaultExpanded = [], className }: R
         </p>
       ) : (
         <div className="-mx-4 sm:-mx-5">
-          <Table size="sm" aria-label={`${copy.receipts.title}. ${LOCAL.sampleNote}`} containerClassName="px-2">
+          <Table size="sm" aria-label={sample ? `${copy.receipts.title}. ${LOCAL.sampleNote}` : "Request receipts"} containerClassName="px-2">
             <TableHeader>
               <TableColumn id="expand" isRowHeader={false} className="w-11 px-1.5!">
                 <span className="sr-only">{LOCAL.details}</span>
@@ -305,7 +309,7 @@ export function ReceiptsPanel({ rows, host, defaultExpanded = [], className }: R
             {copy.receipts.footer.replace("{n}", String(rows.length)).replace("{total}", String(rows.length))}
           </p>
         )}
-        <p>{LOCAL.footer}</p>
+        <p>{sample ? LOCAL.footer : "Stored locally: request time, destination, size and SHA-256 hash. Prompts, screenshots, replies and keys are never saved here. No automatic redaction is performed."}</p>
       </footer>
     </NotchPanel>
   );

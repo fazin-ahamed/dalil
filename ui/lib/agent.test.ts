@@ -139,3 +139,23 @@ test("an already-stopped promise is still handled without an unhandled rejection
   const controller = new AbortController(); controller.abort();
   await assert.rejects(untilStopped(Promise.reject(new Error("late transport error")), controller.signal), { name: "AbortError" });
 });
+
+
+test("a model that omits requested geometry gets one correction, then a checked trigonal reference",async()=>{
+  let calls=0;
+  const answer=await runAgent({...base(),userText:"Explain trigonal bypyramidal and mark its angles",complete:async()=>{calls++;return result("Three equatorial bonds and two axial bonds.");}});
+  assert.equal(calls,2);assert.equal(answer.scene?.type,"model3d");
+  if(answer.scene?.type==="model3d")assert.equal(answer.scene.angles?.length,3);
+});
+
+test("a follow-up that asks for angles repairs a missing angle scene without taking computer control",async()=>{
+  let calls=0;let acted=false;
+  const currentVisual={type:"model3d" as const,title:"Molecule",parts:[{id:"a",shape:"sphere" as const,pos:[0,0,0] as [number,number,number],radius:1}],labels:[]};
+  const complete=async(_endpoint:unknown,messages:ChatMessage[])=>{
+    if(calls++===0)return result("The angle is 90 degrees.");
+    assert.match(JSON.stringify(messages.at(-1)),/real angles/);
+    return JSON.stringify({text:"Here is the marked angle.",scene:{...currentVisual,angles:[{id:"angle",from:[1,0,0],vertex:[0,0,0],to:[0,1,0]}]}});
+  };
+  const answer=await runAgent({...base(),userText:"Mark the angles",currentVisual,tools:{search:true,computer:true},act:async()=>{acted=true;},complete});
+  assert.equal(calls,2);assert.equal(acted,false);assert.equal(answer.scene?.type,"model3d");
+});

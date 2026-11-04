@@ -99,7 +99,7 @@ function AssistantMessage({ message, task, onStop, onFollowUp, onShowVisual }: {
         {message.steps.map((step, i) => <li key={i}><MessageText text={step} /></li>)}
       </ol>}
       {!!message.sources?.length && <div className="mt-3"><Sources sources={message.sources} /></div>}
-      {message.scene && <Button size="xs" variant="secondary" leadingIcon={RiBookOpenLine} onClick={onShowVisual} className="mt-3">{message.scene.type === "diagram" ? "Show diagram" : "Show 3D model"}</Button>}
+      {message.scene && <Button size="xs" variant="secondary" leadingIcon={RiBookOpenLine} onClick={onShowVisual} className="mt-3">{message.scene.type === "diagram" ? "Reopen diagram" : "Reopen 3D model"}</Button>}
       {message.status === "running" ? <Button size="xs" variant="ghost" leadingIcon={RiStopCircleLine} onClick={onStop} className={cx(QUIET, "mt-2")}>Stop task</Button>
         : message.status !== "error" && message.status !== "stopped" && message.text && <div className="mt-3 flex flex-wrap items-center gap-1">
           <IconButton icon={copied ? RiCheckLine : RiFileCopyLine} size="small" aria-label={copied ? "Copied reply" : "Copy reply"} className={QUIET} onClick={() => void copy()} />
@@ -118,7 +118,7 @@ export function ChatPanel({ data, active, actions }: { data: ChatPanelData; acti
   const fade = useScrollFade();
   const tasks = data.tasks ?? [];
   const running = tasks.filter((task) => task.status === "running");
-  const canSend = Boolean(data.draft.trim()) && !data.screenChanging && running.length < 4 && !(data.computerEnabled && data.busy) && !running.some((task) => task.computer);
+  const canSend = Boolean(data.draft.trim()) && !data.screenChanging && running.length < 4 && !running.some((task) => task.computer);
   const empty = data.messages.length === 0;
   useEffect(() => {
     if (!active) return;
@@ -180,20 +180,12 @@ export function ChatPanel({ data, active, actions }: { data: ChatPanelData; acti
     {data.contextLabel && <p className="mb-2 flex items-center gap-1.5 truncate px-1 text-caption-1-medium text-notch-muted"><RiMacbookLine aria-hidden className="size-3.5 shrink-0" />{data.contextLabel}</p>}
     <div className="rounded-2xl border border-notch-rule bg-notch-raised p-2 focus-within:ring-2 focus-within:ring-border-focus-ring">
       <TextField value={data.draft} onChange={actions.onDraft} aria-label="Ask Dalil" className="w-full">
-        <TextArea ref={input} rows={2} placeholder={data.computerEnabled ? "What should I do on your computer?" : "Ask anything, or give me a task…"}
+        <TextArea ref={input} rows={2} placeholder="Ask, learn, or give me a task…"
           className="max-h-28 min-h-14 w-full resize-none border-0 bg-transparent px-2 py-1 text-body-regular text-notch-ink outline-none placeholder:text-notch-muted"
           onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} />
       </TextField>
       <div className="flex items-center gap-1">
-        <Button size="xs" variant="ghost" leadingIcon={RiMacbookLine} aria-pressed={Boolean(data.screenEnabled)} onClick={actions.onScreenToggle} disabled={data.screenChanging}
-          title="Share a screenshot with the configured model for new tasks"
-          className={cx("rounded-lg", data.screenEnabled ? "bg-notch-raised-2 text-notch-accent" : "bg-transparent text-notch-muted hover:bg-notch-raised-2")}>Screen</Button>
-        <Button size="xs" variant="ghost" leadingIcon={RiGlobalLine} aria-pressed={Boolean(data.searchEnabled)} onClick={actions.onSearchToggle}
-          className={cx("rounded-lg", data.searchEnabled ? "bg-notch-raised-2 text-notch-accent" : "bg-transparent text-notch-muted hover:bg-notch-raised-2")}>Search</Button>
-        <Button size="xs" variant="ghost" leadingIcon={RiCursorLine} aria-pressed={Boolean(data.computerEnabled)} onClick={actions.onComputerToggle}
-          title={data.computerReason} aria-describedby="computer-requirements" disabled={!data.computerSupported}
-          className={cx("rounded-lg", data.computerEnabled ? "bg-notch-raised-2 text-notch-accent" : "bg-transparent text-notch-muted hover:bg-notch-raised-2")}>Control</Button>
-        <span id="computer-requirements" className="sr-only">{data.computerReason}</span>
+        <span className="px-2 text-caption-1-medium text-notch-muted" title="Dalil reads the screen, searches, and uses the computer when the task calls for it.">Tools chosen automatically</span>
         <div className="ms-auto flex items-center gap-1">
           <IconButton icon={RiMicLine} size="small" aria-label="Talk to Dalil" className={QUIET} onClick={actions.onTalk} />
           <Button iconOnly size="small" leadingIcon={RiArrowUpLine} aria-label="Send message" disabled={!canSend} onClick={send} className="size-8 rounded-xl" />
@@ -201,8 +193,8 @@ export function ChatPanel({ data, active, actions }: { data: ChatPanelData; acti
       </div>
     </div>
     <footer className="mt-2 flex items-center justify-between gap-2 px-1 text-caption-1-medium text-notch-muted">
-      <span>{data.computerEnabled ? "Computer control on · 12 actions max" : data.screenEnabled ? "Screen context on" : "Screen context off"}</span>
-      <span>{running.length ? "Hide chat to keep working" : "Shift + Enter for a new line"}</span>
+      <span>{data.screenEnabled ? data.computerSupported ? "Screen, search and control ready" : "Screen and search ready" : "Screen disabled in Settings"}</span>
+      <span>{running.length ? "Open the notch to follow progress" : "Shift + Enter for a new line"}</span>
     </footer>
   </div>;
 }

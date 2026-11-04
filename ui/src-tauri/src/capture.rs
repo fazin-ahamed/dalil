@@ -58,7 +58,7 @@ pub async fn capture_screen(app: tauri::AppHandle) -> Result<ScreenShotOut, Stri
 pub(crate) fn screenshots_allowed(app: &tauri::AppHandle) -> bool {
     crate::config_path(app).ok().and_then(|path| std::fs::read(path).ok())
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .is_some_and(|saved| saved["useScreenshots"].as_bool() == Some(true))
+        .is_some_and(|saved| saved["useScreenshots"].as_bool().unwrap_or(true))
 }
 
 /// Windows: the monitor holding the foreground window, copied with GDI and shrunk so the long edge is at
@@ -75,14 +75,14 @@ fn capture_focused_windows() -> Result<ScreenShotOut, String> {
             MonitorFromWindow, ReleaseDC, SelectObject, SetStretchBltMode, StretchBlt, BITMAPINFO, BITMAPINFOHEADER,
             BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, HALFTONE, MONITORINFO, MONITOR_DEFAULTTONEAREST, SRCCOPY,
         },
-        UI::WindowsAndMessaging::GetForegroundWindow,
+
     };
 
     let fail = || "capture-unavailable".to_string();
     // SAFETY: plain GDI calls. Every handle is checked and released before returning, and `pixels` is
     // sized for `w * h` 32-bit pixels, which is what GetDIBits is told it may write.
     let (pixels, w, h, bounds) = unsafe {
-        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
+        let monitor = MonitorFromWindow(crate::context::foreground_window(), MONITOR_DEFAULTTONEAREST);
         let mut info: MONITORINFO = zeroed();
         info.cbSize = size_of::<MONITORINFO>() as u32;
         if GetMonitorInfoW(monitor, &mut info) == 0 {

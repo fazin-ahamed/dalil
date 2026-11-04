@@ -1,9 +1,11 @@
 "use client";
 
+
 import "../shell.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NOTCH_STAGE, Notch, type NotchAction, type NotchEndpoint } from "@/components/dalil/notch";
 import { useTutor, type TutorView } from "./use-tutor";
+import { LibraryPanel } from "@/components/dalil/notch/library-panel";
 import { SetupPanel } from "@/components/dalil/setup/setup-panel";
 import { useEndpointSetup } from "@/components/dalil/setup/use-endpoint-setup";
 import { desktopShortcuts, onShortcutsChanged, type DesktopShortcut, inputMode, isTauri, loadEndpoint, onCommand, onEndpointChanged, onWindowBlur, saveEndpoint, setInputRect, setInteractive, setKeyboard } from "@/lib/native-bridge";
@@ -25,7 +27,7 @@ async function readUserName(): Promise<string> {
 
 /** Hidden notch leaves a small top-edge target; hovering it or using --ask brings it back. */
 export default function NotchWindow() {
-  const [view, setView] = useState<"rest" | "home" | "setup" | TutorView>("rest");
+  const [view, setView] = useState<"rest" | "home" | "setup" | "projects" | "receipts" | TutorView>("rest");
   const [visibility, setVisibility] = useState<"visible" | "compact" | "hidden">("visible");
   const hidden = visibility === "hidden";
   const [shortcuts, setShortcuts] = useState<DesktopShortcut[]>([]);
@@ -75,8 +77,8 @@ export default function NotchWindow() {
   }, []);
   const resetIdle = useCallback(() => {
     clearTimeout(idleTimer.current);
-    if (visibilityRef.current === "visible" && viewRef.current !== "listen" && !tutor.speaking) idleTimer.current = setTimeout(() => hide(false), IDLE_MS);
-  }, [hide, tutor.speaking]);
+    if (visibilityRef.current === "visible" && viewRef.current !== "listen" && !tutor.speaking && !tutor.busy) idleTimer.current = setTimeout(() => hide(false), IDLE_MS);
+  }, [hide, tutor.speaking, tutor.busy]);
 
   useEffect(() => {
     resetIdle();
@@ -119,7 +121,7 @@ export default function NotchWindow() {
   useEffect(() => {
     applyInput();
   }, [region, hidden, applyInput]);
-  useEffect(() => { void setKeyboard(visibility === "visible" && (view === "setup" || view === "ask" || view === "listen")); }, [visibility, view]);
+  useEffect(() => { void setKeyboard(visibility === "visible" && (view === "setup" || view === "ask" || view === "listen" || view === "projects" || view === "receipts")); }, [visibility, view]);
 
   const pointerMoved = useCallback((p: PointerPayload) => {
     lastPointer.current = p;
@@ -152,6 +154,7 @@ export default function NotchWindow() {
     };
     const onLeave = () => { if (!isTauri()) pointerMoved({ inside: false, x: -1, y: -1 }); };
     const onPress = (event: PointerEvent) => {
+      if (viewRef.current === "thinking") return;
       const { left, w, h, y: top } = hiddenRef.current ? WAKE : rectRef.current;
       const bounds = host.current?.getBoundingClientRect();
       const x = event.clientX - (bounds?.left ?? 0);
@@ -171,7 +174,7 @@ export default function NotchWindow() {
     window.addEventListener("wheel", resetIdle, { passive: true });
     document.documentElement.addEventListener("mouseleave", onLeave);
     let offBlur = () => {};
-    void onWindowBlur(() => { if (viewRef.current !== "rest") hide(); }).then((fn) => alive ? (offBlur = fn) : fn());
+    void onWindowBlur(() => { if (viewRef.current !== "rest" && viewRef.current !== "thinking") hide(); }).then((fn) => alive ? (offBlur = fn) : fn());
     return () => {
       alive = false; off(); offBlur();
       window.removeEventListener("pointermove", onMove);
@@ -214,15 +217,19 @@ export default function NotchWindow() {
     if (action === "open-setup") void openSetup();
     if (action === "open-ask") void openAsk();
     if (action === "open-talk") void toggleTalk();
-  }, [hide, openAsk, openSetup, reveal, toggleTalk]);
+    if (action === "open-projects" || action === "open-receipts") void stopComputer().then(()=>setView(action === "open-projects" ? "projects" : "receipts"));
+    if (action === "stop-task") { const task=tutor.tasks.find(task=>task.status==="running");if(task)void tutor.stopTask(task.id); }
+  }, [hide, openAsk, openSetup, reveal, stopComputer, toggleTalk, tutor]);
   useEffect(() => {
     if (view !== "setup") return;
     const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-shell] [data-autofocus]")?.focus({ preventScroll: true }));
     return () => cancelAnimationFrame(frame);
   }, [view]);
 
-  const common = { onAction, onShape, stageHeight: STAGE_HEIGHT, compact: visibility !== "visible", shortcutHint: shortcuts.length ? "Global keyboard shortcuts are listed in the tray menu." : undefined, setupPanel: <SetupPanel model={model} actions={setupActions} />, working: tutor.tasks.filter((task) => task.status === "running").length };
-  const using = [tutor.contextLabel && `Using ${tutor.contextLabel}`, tutor.project && `Project ${tutor.project.name}`].filter(Boolean).join(" · ");
+  const common = { onAction, onShape, stageHeight: STAGE_HEIGHT, compact: visibility !== "visible", projectName: tutor.project?.name, thinkingText: tutor.tasks.find(task=>task.status==="running")?.activities.at(-1)?.label,
+    shortcutHint: shortcuts.length ? "Ctrl + Alt + Space to ask. I’ll take it from here." : "Ask a question. I’ll bring the explanation to your screen.",
+    setupPanel: view === "projects" || view === "receipts" ? <LibraryPanel kind={view} onBack={()=>setView("home")} onProjectChanged={()=>void tutor.refresh()}/> : <SetupPanel model={model} actions={setupActions} />, working: tutor.tasks.filter((task) => task.status === "running").length };
+  const using = [tutor.contextLabel && `Using ${tutor.contextLabel}`, tutor.project && `Project ${tutor.project.name}`].filter(Boolean).join(". ");
   return <div ref={host} className="relative mx-auto" style={{ width: NOTCH_STAGE.w }} data-notch-hidden={hidden} data-notch-phase={visibility}>
     {hidden && <button type="button" aria-label="Open Dalil" onPointerEnter={() => { if (!suppressWake.current) reveal(); }} onFocus={reveal} onClick={() => { reveal(); openAsk(); }}
       className="absolute top-0 z-10 h-2 w-33 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring" style={{ left: WAKE.left }} />}
@@ -230,14 +237,14 @@ export default function NotchWindow() {
       {view === "listen" ? <Notch state="listening" transcript="" level={tutor.level} {...common} />
         : view === "ask" ? <Notch state="ask" draft={tutor.draft} onDraft={tutor.setDraft} onSubmit={(value) => void submit(value)} busy={tutor.busy}
           messages={tutor.messages} tasks={tutor.tasks} error={tutor.error} contextLabel={using || undefined}
-          onTalk={() => void toggleTalk()} onSearchToggle={() => tutor.setSearchEnabled((on) => !on)} onComputerToggle={tutor.toggleComputer}
+          onTalk={() => void toggleTalk()}
           onStopTask={tutor.stopTask} onNewChat={tutor.newChat} onDismiss={() => hide()} onSetup={() => onAction("open-setup")}
           onShowVisual={tutor.showVisual}
-          onScreenToggle={() => void tutor.toggleScreen()} screenChanging={tutor.screenChanging}
           shortcuts={shortcuts}
-          searchEnabled={tutor.searchEnabled} computerEnabled={tutor.computerEnabled} screenEnabled={tutor.screenEnabled}
+          searchEnabled={tutor.searchEnabled} screenEnabled={tutor.screenEnabled}
           computerSupported={tutor.capabilities.supported} computerReason={tutor.capabilities.reason} {...common} />
-          : view === "setup" ? <Notch state="setup" {...common} />
+          : view === "thinking" ? <Notch state="thinking" {...common} />
+          : view === "setup" || view === "projects" || view === "receipts" ? <Notch state="setup" {...common} />
             : view === "rest" ? <Notch state="rest" {...common} />
               : <Notch state="home" name={name} hour={new Date().getHours()} endpoint={endpoint} {...common} />}
     </div>

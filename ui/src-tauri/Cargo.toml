@@ -23,6 +23,7 @@ cpal = "0.15"
 hound = "3"
 base64 = "0.22"
 quick-xml = { version = "0.42", features = ["serialize"] }
+sha2 = "0.10"
 
 [profile.release]
 lto = true

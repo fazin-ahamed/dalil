@@ -59,6 +59,8 @@ pub fn computer_begin(app: tauri::AppHandle, window: WebviewWindow, state: State
     if !crate::capture::screenshots_allowed(&app) { return Err("computer-no-screen".into()); }
     let mut current = state.0.lock().map_err(|_| "computer-unavailable")?;
     if current.is_some() { return Err("computer-busy".into()); }
+    #[cfg(windows)]
+    crate::context::restore_focus();
     *current = Some(session);
     Ok(())
 }
@@ -168,7 +170,7 @@ pub async fn computer_action(
             return linux_input(&action, screen, &grant, &session);
         }
         #[cfg(windows)]
-        return windows_input(&action, screen);
+        return windows_input(&action, screen, &grant, &session);
         #[cfg(not(any(target_os = "linux", windows)))]
         Err("computer-unavailable".into())
     }).await.map_err(|_| "computer-unavailable".to_string())?
@@ -222,17 +224,26 @@ fn linux_input(action: &ComputerAction, screen: ScreenBounds, grant: &Mutex<Opti
 }
 
 #[cfg(windows)]
-fn windows_input(action: &ComputerAction, screen: ScreenBounds) -> Result<(), String> {
+fn windows_input(action: &ComputerAction, screen: ScreenBounds, grant: &Mutex<Option<String>>, session: &str) -> Result<(), String> {
     use std::mem::{size_of, zeroed};
-    use windows_sys::Win32::UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::SetCursorPos};
+    use windows_sys::Win32::UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::{GetCursorPos, SetCursorPos}};
     let key = |code, scan, flags| INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: code, wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: 0 } } };
     let mouse = |flags, data| INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dx: 0, dy: 0, mouseData: data, dwFlags: flags, time: 0, dwExtraInfo: 0 } } };
     let mut inputs = Vec::new();
     match action {
         ComputerAction::Click { x, y, button, double } => {
             let (x, y) = pixels(*x, *y, screen);
-            // SAFETY: bounded screen coordinates and initialized INPUT structures; no borrowed pointers escape.
-            if unsafe { SetCursorPos(x, y) } == 0 { return Err("computer-input-blocked".into()); }
+            let mut start = windows_sys::Win32::Foundation::POINT { x, y };
+            unsafe { GetCursorPos(&mut start); }
+            for frame in 1..=18 {
+                permitted(grant, session)?;
+                let t = frame as f64 / 18.0;
+                let ease = t * t * (3.0 - 2.0 * t);
+                let at = |from: i32, to: i32| (from as f64 + (to as f64 - from as f64) * ease).round() as i32;
+                if unsafe { SetCursorPos(at(start.x, x), at(start.y, y)) } == 0 { return Err("computer-input-blocked".into()); }
+                std::thread::sleep(std::time::Duration::from_millis(14));
+            }
+            permitted(grant, session)?;
             let (down, up) = if button.as_deref() == Some("right") { (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP) } else { (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP) };
             for _ in 0..if *double { 2 } else { 1 } { inputs.extend([mouse(down, 0), mouse(up, 0)]); }
         }
@@ -243,6 +254,7 @@ fn windows_input(action: &ComputerAction, screen: ScreenBounds) -> Result<(), St
         }
         ComputerAction::Scroll { direction, amount } => inputs.push(mouse(MOUSEEVENTF_WHEEL, (if direction == "up" { 120 * *amount as i32 } else { -120 * *amount as i32 }) as u32)),
     }
+    permitted(grant, session)?;
     // SAFETY: the initialized slice remains alive for the synchronous SendInput call.
     let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
     if sent as usize != inputs.len() {

@@ -1,4 +1,6 @@
 import type { DiagramItem, DiagramScene, Tone } from "./contracts";
+// @ts-expect-error node strip-types needs the extension
+import { angleArc } from "./visual-geometry.ts";
 
 /*
  * Geometry for hand-drawn notes. Pure: no React, no DOM and no runtime imports, so Node's test runner can
@@ -104,7 +106,8 @@ export interface NoneLayout {
   id: string;
 }
 
-export type ItemLayout = BoxLayout | TextLayout | ArrowLayout | HighlightLayout | NoneLayout;
+export interface GeometryLayout {kind:"geometry";id:string;path:string;tone:Tone;label?:PlacedText}
+export type ItemLayout = BoxLayout | TextLayout | ArrowLayout | HighlightLayout | GeometryLayout | NoneLayout;
 
 export interface DiagramLayout {
   /** Every item in draw order, one entry per item. */
@@ -544,6 +547,21 @@ export function layoutDiagram(scene: DiagramScene): DiagramLayout {
         return arrowLayout(item, made);
       case "highlight":
         return highlightLayout(item, made);
+      case "line":
+      case "angle": {
+        const a=toView(...item.from),b=toView(...item.to);
+        let points=[a,b],at={x:(a.x+b.x)/2,y:(a.y+b.y)/2-12};
+        let label=item.label;
+        if(item.kind==="angle") {
+          const v=toView(...item.vertex);
+          const arc=angleArc({id:item.id,from:[a.x,a.y,0],vertex:[v.x,v.y,0],to:[b.x,b.y,0],radius:(item.radius??10)*3});
+          if(!arc)return {kind:"none",id:item.id};
+          points=arc.points.map(([x,y])=>({x,y}));at={x:arc.label[0],y:arc.label[1]};
+          label=label??`${arc.degrees}°`;
+        }
+        return {kind:"geometry",id:item.id,tone:item.tone??"ink",path:points.map((p,i)=>`${i?"L":"M"} ${num(p.x)} ${num(p.y)}`).join(" "),
+          ...(label?{label:placeAt(fitText(label,120,30,TEXT_SIZE.label),at.x,at.y)}:{})};
+      }
     }
   });
   return { items, footnote: scene.footnote };

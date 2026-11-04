@@ -5,6 +5,7 @@
  * axes: light/handwritten/chromatic-blue · posture: calm, hand-inked, deliberate · contrast: pass · v2.0.0 */
 /* Hallmark · pre-emit critique: P4 H4 E3 S4 R4 V4 · weakest: E, desktop windows are untested on a real compositor; the page is only a transparent frame */
 /* Hallmark · waive 47b · the desktop window frames this product's own notch component, not a re-drawn OS window · the frame is transparent and holds real controls */
+/* Hallmark · waive 26b · wake target is always enabled; imported BoardUI buttons own disabled states · the hidden notch must remain reopenable by pointer or keyboard */
 html:has([data-shell]),
 body:has([data-shell]) {
   background: transparent;

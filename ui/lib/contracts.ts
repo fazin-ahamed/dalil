@@ -107,7 +107,9 @@ export type DiagramItem =
   /** An arrow from one box or text item to another, by id. */
   | { id: string; kind: "arrow"; from: string; to: string; label?: string }
   /** A marker-pen ring or underline drawn round an existing item, by id. */
-  | { id: string; kind: "highlight"; target: string };
+  | { id: string; kind: "highlight"; target: string }
+  | { id: string; kind: "line"; from: [number, number]; to: [number, number]; label?: string; tone?: Tone }
+  | { id: string; kind: "angle"; from: [number, number]; vertex: [number, number]; to: [number, number]; radius?: number; label?: string; tone?: Tone };
 
 /** A hand-drawn note: a few boxes, arrows and words that appear one by one as Dalil explains. */
 export interface DiagramScene {
@@ -143,11 +145,21 @@ export interface Label3D {
   caption?: string;
 }
 
+export interface Angle3D {
+  id: string;
+  from: [number, number, number];
+  vertex: [number, number, number];
+  to: [number, number, number];
+  radius?: number;
+  tone?: Tone;
+}
+
 /** A labelled 3D model, like a jet engine cutaway with "1 Fan, 2 Compressor, 3 Combustor, 4 Turbine". */
 export interface Model3DScene {
   type: "model3d";
   title: string;
   parts: Part[];
+  angles?: Angle3D[];
   labels: Label3D[];
   /** Slice away the front half so the inside shows. */
   cutaway?: boolean;
@@ -159,12 +171,20 @@ export interface Model3DScene {
 
 export type Scene = DiagramScene | Model3DScene;
 
+/** Coordinates use the captured screen, 0 to 1000 from its top-left. */
+export type ScreenAnnotation =
+  | { kind: "pen"; points: [number, number][]; tone?: Tone }
+  | { kind: "arrow"; from: [number, number]; to: [number, number]; tone?: Tone }
+  | { kind: "ellipse" | "rect"; x: number; y: number; w: number; h: number; tone?: Tone }
+  | { kind: "text"; x: number; y: number; text: string; tone?: Tone };
+
 /** What the notch tells the overlay window to draw. Sent as the payload of the `dalil://overlay` event. */
 export type OverlayCommand =
-  | { kind: "marks"; marks: Mark[] }
+  | { kind: "marks"; marks: Mark[]; screen?: ScreenBounds }
+  | { kind: "annotations"; annotations: ScreenAnnotation[]; screen?: ScreenBounds }
   | { kind: "card"; title: string; lines: string[] }
   /** A drawing: a hand-drawn note or a labelled 3D model. Replaces any scene already showing. */
-  | { kind: "scene"; scene: Scene }
+  | { kind: "scene"; scene: Scene; text?: string }
   | { kind: "point"; x: number; y: number; label?: string }
   | { kind: "clear" };
 
@@ -193,6 +213,7 @@ export interface TutorReply {
   steps: string[];
   /** Labelled points on the screen to point at, in order. Empty when nothing on screen is relevant. */
   marks: Mark[];
+  annotations?: ScreenAnnotation[];
   /** A drawing to show while explaining: a hand-drawn note or a labelled 3D model. Null for a plain answer. */
   scene?: Scene | null;
   /** A topic name worth remembering, or null. */

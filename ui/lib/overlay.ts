@@ -1,4 +1,4 @@
-import type { OverlayCommand } from "./contracts";
+import type { OverlayCommand, ScreenBounds } from "./contracts";
 import { isTauri } from "./native-bridge";
 
 /** Time for the overlay's own 200 ms fade to finish before its window is hidden. */
@@ -16,12 +16,12 @@ export async function setOverlayInput(rects: [number, number, number, number][])
   await invoke("overlay_set_input", { rects });
 }
 
-export async function sendOverlay(cmd: OverlayCommand): Promise<void> {
+export async function sendOverlay(cmd: OverlayCommand, screen?: ScreenBounds): Promise<void> {
   if (!isTauri()) return;
   const current = ++revision;
   const { invoke } = await import("@tauri-apps/api/core");
   const { emitTo } = await import("@tauri-apps/api/event");
-  if (cmd.kind !== "clear") await invoke("overlay_show");
+  if (cmd.kind !== "clear") await invoke("overlay_show", { screen: screen ?? ("screen" in cmd ? cmd.screen : undefined) ?? null });
   await emitTo("overlay", "dalil://overlay", cmd);
   if (cmd.kind === "clear") {
     await new Promise((resolve) => setTimeout(resolve, HIDE_AFTER_CLEAR_MS));

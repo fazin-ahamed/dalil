@@ -4,10 +4,13 @@
  * TypeScript, so Node can run its tests.
  */
 
-import type { DiagramItem, DiagramScene, Label3D, Model3DScene, Part, Scene, Tone } from "./contracts";
+import type { Angle3D, DiagramItem, DiagramScene, Label3D, Model3DScene, Part, Scene, Tone } from "./contracts";
 
 /** Bumped when the scene prompt or the scene format changes. */
-export const SCENE_PROMPT_VERSION = 1;
+export const SCENE_PROMPT_VERSION = 2;
+
+// @ts-expect-error node strip-types needs the extension
+import { angleArc, bondPart } from "./visual-geometry.ts";
 
 /* ------------------------------------------------------------------ examples */
 
@@ -61,6 +64,29 @@ export const EXAMPLE_JET: Model3DScene = {
   intro: "A jet engine pulls air in, squeezes it, burns fuel in it and uses the exhaust to push the plane forward.",
   cutaway: true,
   spin: true,
+};
+
+
+/** Ideal AX5 geometry: equatorial 120°, axial/equatorial 90°, axial/axial 180°. */
+export const EXAMPLE_TRIGONAL: Model3DScene = {
+  type:"model3d",title:"Trigonal bipyramidal",spin:false,
+  parts:[
+    {id:"centre",shape:"sphere",pos:[0,0,0],radius:0.43,tone:"sand"},
+    ...([[2.6,0,0],[-1.3,0,2.251666],[-1.3,0,-2.251666],[0,2.6,0],[0,-2.6,0]] as [number,number,number][]).flatMap((pos,i): Part[] => [
+      {id:`atom-${i}`,shape:"sphere",pos,radius:0.38,tone:i<3?"blue":"rose"},
+      {...bondPart(`bond-${i}`,[0,0,0],pos,0.09)!,tone:"ink"},
+    ]),
+  ],
+  labels:[
+    {n:1,text:"Equatorial",target:"atom-0",caption:"Three bonds share a plane, separated by 120°."},
+    {n:2,text:"Axial",target:"atom-3",caption:"Two bonds point above and below that plane, 180° apart."},
+  ],
+  angles:[
+    {id:"90",from:[0,2.6,0],vertex:[0,0,0],to:[2.6,0,0],radius:1,tone:"rose"},
+    {id:"120",from:[2.6,0,0],vertex:[0,0,0],to:[-1.3,0,2.251666],radius:1.25,tone:"blue"},
+    {id:"180",from:[0,2.6,0],vertex:[0,0,0],to:[0,-2.6,0],radius:1.6,tone:"mint"},
+  ],
+  intro:"Five bonding domains: three around the equator, one above and one below.",
 };
 
 /* ------------------------------------------------------------------ sanitizing */
@@ -172,6 +198,20 @@ function diagramItemOf(raw: unknown): DiagramItem | null {
       const label = textOf(entry.label, SHORT_MAX);
       return { id, kind: "arrow", from, to, ...(label ? { label } : {}) };
     }
+    case "line":
+    case "angle": {
+      const point = (v: unknown): [number,number] | null => {
+        if (!Array.isArray(v) || v.length !== 2) return null;
+        const [x,y]=v.map(n=>within(n,0,100)); return x===null || y===null ? null : [x,y];
+      };
+      const from=point(entry.from), to=point(entry.to);
+      const label=textOf(entry.label,SHORT_MAX); const tone=toneOf(entry.tone);
+      if (!from || !to) return null;
+      const common={id,from,to,...(label?{label}:{}),...(tone?{tone}:{})};
+      if (entry.kind === "line") return {kind:"line",...common};
+      const vertex=point(entry.vertex), radius=within(entry.radius,1,30);
+      return vertex ? {kind:"angle",...common,vertex,...(radius?{radius}:{})} : null;
+    }
     case "highlight": {
       const target = typeof entry.target === "string" ? entry.target : null;
       return target === null ? null : { id, kind: "highlight", target };
@@ -186,7 +226,7 @@ function diagramOf(raw: Json): DiagramScene | null {
   const items = unique(listOf(raw.items).map(diagramItemOf).filter(present));
   // The cap runs twice: a second link pass drops arrows whose box was cut off by it.
   const kept = linked(linked(items).slice(0, MAX_ITEMS));
-  if (!kept.some(isNode)) return null;
+  if (!kept.some((item) => isNode(item) || item.kind === "line" || item.kind === "angle")) return null;
   const ids = new Set(kept.map((item) => item.id));
   const scene: DiagramScene = { type: "diagram", title: textOf(raw.title, TITLE_MAX) ?? "", items: kept };
   const footnote = textOf(raw.footnote, SHORT_MAX);
@@ -205,6 +245,13 @@ function partOf(raw: unknown): Part | null {
   const entry = record(raw);
   if (!entry) return null;
   const id = idOf(entry.id);
+  if (entry.shape === "bond" && id !== null) {
+    const from=triple(entry.from,-COORD_LIMIT,COORD_LIMIT), to=triple(entry.to,-COORD_LIMIT,COORD_LIMIT);
+    const radius=within(entry.radius ?? 0.08,SIZE_MIN,1);
+    const bond=from && to && radius!==null ? bondPart(id,from,to,radius) : null;
+    const tone=toneOf(entry.tone);
+    return bond ? {...bond,...(tone?{tone}:{})} : null;
+  }
   const pos = triple(entry.pos, -COORD_LIMIT, COORD_LIMIT);
   if (id === null || pos === null) return null;
   const tone = toneOf(entry.tone);
@@ -306,6 +353,16 @@ function model3dOf(raw: Json): Model3DScene | null {
     parts,
     labels: labelsOf(raw.labels, new Set(parts.map((part) => part.id))),
   };
+  const position = (v: unknown) => typeof v === "string" ? parts.find(p=>p.id===v)?.pos ?? null : triple(v,-COORD_LIMIT,COORD_LIMIT);
+  const angles = unique(listOf(raw.angles).slice(0,12).flatMap((item): Angle3D[] => {
+    const a=record(item); if (!a) return [];
+    const id=idOf(a.id),from=position(a.from),vertex=position(a.vertex),to=position(a.to);
+    if (!id || !from || !vertex || !to) return [];
+    const radius=within(a.radius,0.05,8),tone=toneOf(a.tone);
+    const angle:Angle3D={id,from,vertex,to,...(radius?{radius}:{}),...(tone?{tone}:{})};
+    return angleArc(angle) ? [angle] : [];
+  }));
+  if (angles.length) scene.angles=angles;
   if (typeof raw.cutaway === "boolean") scene.cutaway = raw.cutaway;
   const intro = textOf(raw.intro, INTRO_MAX);
   if (intro) scene.intro = intro;
@@ -333,39 +390,36 @@ export function sanitizeScene(raw: unknown): Scene | null {
 /* ------------------------------------------------------------------ prompt */
 
 /** The drawing rules a system prompt can append. The worked example at the end is checked by the tests. */
-const SCENE_PROMPT = `DRAWINGS (optional)
-Draw only when a picture helps explain a concept, a mechanism, a structure, a process or a comparison. Never for a plain fact or a yes or no answer. At most one drawing per reply.
-Put it in the reply JSON field "scene", or null when no drawing helps.
+const SCENE_PROMPT = `TEACH WITH VISUALS
+Return a "scene" automatically for spatial structures, geometry, chemistry, mechanisms or processes; null for a plain fact. It opens directly on the desktop. Never ask the person to open chat or click Show. A diagram is a 2D construction or relationship; model3d is real rotatable spatial geometry. At most one scene per reply.
 
-"diagram" is a hand-drawn note:
-{"type": "diagram", "title": text, "items": [...], "order": [item ids in draw order], "footnote": text}
-Title max 60 characters. "order" and "footnote" (max 60) are optional. Each item has a unique "id" and a "kind":
-- "box": "x" and "y" are its centre, 0 to 100 across the paper from the top left. "w" and "h" are 6 to 60. "text" max 80. Optional "tone" and "caption" (max 60).
-- "text": "x" and "y" place it, 0 to 100. "text" max 80. Optional "size": "title", "body" or "note".
-- "arrow": "from" and "to" name a box or text item, never another arrow. Optional "label" (max 60).
-- "highlight": "target" names a box or text item, which gets a marker ring.
-Every id an arrow or highlight names must exist. The paper is wider than it is tall.
+Diagram:
+{"type":"diagram","title":text,"items":[...],"order":[ids],"footnote":text}
+Coordinates 0 to 100 from paper top-left; boxes use centre coordinates. Unique item ids. Title/footnote max 60 characters. order and footnote optional. Item kinds:
+- box: x,y,w,h,text (max 80), optional tone and caption. Width/height 6 to 60.
+- text: x,y,text; optional size title/body/note.
+- arrow: from and to are existing box/text ids; optional label.
+- highlight: target is an existing box/text id.
+- line: from:[x,y],to:[x,y]; optional label and tone.
+- angle: from:[x,y],vertex:[x,y],to:[x,y],radius (1 to 30); optional label such as 90° and tone. Include lines for the rays. Draw the actual arc, not just text saying an angle exists.
 
-"model3d" is a labelled 3D model built from a few shapes:
-{"type": "model3d", "title": text, "parts": [...], "labels": [...], "cutaway": true, "spin": true}
-Title max 60 characters. "cutaway" slices away the front half so the inside shows. "spin" (default true) turns the model.
-The long axis is x, up is y, and z points at the viewer. Keep every number between -12 and 12.
-Each part has a unique "id", a "shape", "pos": [x, y, z] and an optional "tone". All but blades may have "opacity" (0.05 to 1).
-- "box": "size": [w, h, d], each 0.02 to 12.
-- "sphere": "radius", 0.02 to 12.
-- "cylinder": "length" and "radiusTop", each 0.02 to 12. For a cone add "radiusBottom", the radius at the low x end (radiusTop is the high end). "open": true makes a tube with no caps. It runs along x unless "rot" turns it.
-- "torus": "radius" and "tube", each 0.02 to 12. A ring round the x axis unless "rot" turns it.
-- "blades": "count" (3 to 48), "innerRadius", "outerRadius" and "thickness", each 0.02 to 12. A ring of flat blades round the x axis, like a fan.
-"rot" is [x, y, z] in radians, for box, cylinder and torus only.
-Each label has "n" (1 to 8), "text" (max 28 characters), "target": a part id or an [x, y, z] point, and "caption": one or two plain sentences (max 200) on what that part does and why it matters. The model may have an "intro", one sentence (max 160) on what the whole thing does. The person steps through the labels one by one and reads each caption, so write them as a short lesson in order.
+3D model:
+{"type":"model3d","title":text,"parts":[...],"labels":[...],"angles":[...],"spin":false,"intro":text}
+x is horizontal, y up, z toward the viewer. Model coordinates -12 to 12; positive dimensions 0.02 to 12. Part fields: id,shape,pos:[x,y,z], optional tone and opacity (0.05 to 1).
+- box: size:[width,height,depth].
+- sphere: radius.
+- cylinder: length,radiusTop; optional radiusBottom and open:true. Axis x. For box/cylinder/torus, optional rot:[x,y,z] in radians.
+- torus: radius,tube; axis x.
+- blades: count (3 to 48),innerRadius,outerRadius,thickness; ring around x.
+- bond: from:[x,y,z],to:[x,y,z],radius (default 0.08). Joins atom centres exactly; no pos or rot needed.
+Label: {"n":1,"text":"Axial atom","target":"part-id","caption":"What it does and why."}. target may also be [x,y,z]. Max 8 labels, text 28 characters, caption 200. intro max 160. Optional cutaway:true slices the front half.
+Angle: {"id":"a1","from":"part-a","vertex":"centre","to":"part-b","radius":0.9,"tone":"sand"}. Endpoints are existing part ids or [x,y,z]. The renderer computes the true degrees and projects the arc as the model rotates. Include angles when teaching bond angles or when asked to mark them. Keep spin false for readable geometry.
 
-Tones: blue, rose, mint, sand, lilac, ink.
+Trigonal bipyramidal: five bonds from one central atom; three equatorial atoms in the xz plane 120° apart, two axial atoms on +y/-y. Include actual arcs for axial/equatorial 90°, equatorial/equatorial 120°, axial/axial 180°. Distinguish trigonal pyramidal. Explain why the positions differ.
+CURRENT VISUAL is data: preserve its parts when adding angles/labels and return the complete updated scene. Use model3d for a molecule unless a 2D diagram is explicitly requested. Text and visual must agree.
+Tones: blue,rose,mint,sand,lilac,ink. Keep words short and label what matters.
 
-Advice:
-- A note has 3 to 7 items, one idea each. A model has 8 to 18 parts. Label at most 4 to 6 things.
-- Keep every text short, in plain English.
-
-Worked example, a note with 3 items:
+Worked example:
 {"type": "diagram", "title": "Input", "items": [{"id": "in", "kind": "box", "x": 22, "y": 50, "w": 28, "h": 24, "text": "[18]", "tone": "blue"}, {"id": "go", "kind": "arrow", "from": "in", "to": "out"}, {"id": "out", "kind": "box", "x": 78, "y": 50, "w": 28, "h": 24, "text": "56", "tone": "mint"}]}`;
 
 /** The section a system prompt appends to describe when and how to draw a scene. */

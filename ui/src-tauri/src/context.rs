@@ -35,13 +35,37 @@ fn current() -> Option<ContextSnapshot> {
     niri().or_else(hyprland).or_else(sway).or_else(x11)
 }
 
+#[cfg(windows)]
+static LAST_EXTERNAL: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+#[cfg(windows)]
+pub(crate) fn foreground_window() -> windows_sys::Win32::Foundation::HWND {
+    use std::sync::atomic::Ordering;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, IsWindow};
+    let current = unsafe { GetForegroundWindow() };
+    let mut process = 0;
+    unsafe { GetWindowThreadProcessId(current, &mut process); }
+    if !current.is_null() && process != std::process::id() {
+        LAST_EXTERNAL.store(current as isize, Ordering::Relaxed);
+        return current;
+    }
+    let previous = LAST_EXTERNAL.load(Ordering::Relaxed) as windows_sys::Win32::Foundation::HWND;
+    if unsafe { IsWindow(previous) } != 0 { previous } else { std::ptr::null_mut() }
+}
+
+#[cfg(windows)]
+pub(crate) fn restore_focus() {
+    let target = foreground_window();
+    if !target.is_null() { unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(target); } }
+}
+
 /// The foreground window's title, split into the app and the document.
 #[cfg(windows)]
 fn current() -> Option<ContextSnapshot> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
     let mut buffer = [0u16; 512];
     // SAFETY: GetWindowTextW writes at most `buffer.len()` UTF-16 units and returns how many it wrote.
-    let length = unsafe { GetWindowTextW(GetForegroundWindow(), buffer.as_mut_ptr(), buffer.len() as i32) };
+    let length = unsafe { GetWindowTextW(foreground_window(), buffer.as_mut_ptr(), buffer.len() as i32) };
     let full = String::from_utf16_lossy(buffer.get(..usize::try_from(length).ok()?)?);
     let (app, title) = split_title(&full);
     snapshot(Some(app), Some(title), "windows")

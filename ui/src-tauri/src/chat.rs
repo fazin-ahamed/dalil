@@ -60,11 +60,15 @@ pub async fn chat_complete(app: tauri::AppHandle, messages: Vec<ChatMessage>) ->
         .build()
         .map_err(|_| "unreachable")?;
 
+    let host = url.host_str().unwrap_or_default().to_string();
+    let screenshot = messages.iter().any(|message| message.content.as_array().is_some_and(|parts| parts.iter().any(|part| part["type"] == "image_url")));
+    let receipt_body = body.clone();
     let mut request = client.post(url).header(CONTENT_TYPE, "application/json").body(body);
     if let Some((name, value)) = auth_header(&key, &endpoint.header_name, endpoint.scheme)? {
         request = request.header(name, value);
     }
     let mut response = request.send().await.map_err(transport_error)?;
+    crate::receipts::record(&app, &host, &endpoint.model, &receipt_body, screenshot)?;
     if let Some(code) = status_error(response.status().as_u16()) {
         return Err(code.into());
     }

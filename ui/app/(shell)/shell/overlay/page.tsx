@@ -8,10 +8,15 @@ import { RoughFilters } from "@/components/dalil/cards/rough-filters";
 import { DiagramView } from "@/components/dalil/scene/diagram-view";
 import { Model3DView } from "@/components/dalil/scene/model-3d";
 import { VisualFrame } from "@/components/dalil/scene/visual-frame";
+import { ScreenSketch } from "@/components/dalil/overlay/screen-sketch";
+import { MessageText } from "@/components/dalil/notch/message-text";
+import { Button } from "@/components/base/buttons/button";
+import { ScrollFade,useScrollFade } from "@/components/foundations/scroll-fade/scroll-fade";
+import { readAnnotations } from "@/lib/annotations";
 import { MarkLabel } from "@/components/dalil/overlay/mark-label";
 import { PointerLayer, type PointerLayerHandle } from "@/components/dalil/pointer/pointer-layer";
-import type { Mark, OverlayCommand, Scene as VisualScene } from "@/lib/contracts";
-import { EXAMPLE_DIAGRAM, EXAMPLE_JET } from "@/lib/scene";
+import type { Mark, OverlayCommand, ScreenAnnotation, Scene as VisualScene } from "@/lib/contracts";
+import { EXAMPLE_DIAGRAM, EXAMPLE_JET, EXAMPLE_TRIGONAL } from "@/lib/scene";
 import { isTauri } from "@/lib/native-bridge";
 import { setOverlayInput } from "@/lib/overlay";
 import { layoutMarks, toPixels, type MarkLayout } from "@/lib/overlay-layout";
@@ -47,6 +52,7 @@ interface Scene {
 interface Visual {
   id: number;
   scene: VisualScene;
+  text?: string;
 }
 
 interface CardScene {
@@ -66,6 +72,9 @@ export default function OverlayPage() {
   const [scene, setScene] = useState<Scene>({ id: 0, marks: [] });
   const [card, setCard] = useState<CardScene | null>(null);
   const [visual, setVisual] = useState<Visual | null>(null);
+  const [annotations,setAnnotations]=useState<ScreenAnnotation[]>([]);
+  const sketchBox=useRef<HTMLDivElement>(null);
+  const explanationFade=useScrollFade();
   const [fading, setFading] = useState(false);
   const visualBox = useRef<HTMLDivElement>(null);
   const cardBox = useRef<HTMLDivElement>(null);
@@ -81,7 +90,7 @@ export default function OverlayPage() {
   const reportInput = useCallback(() => {
     // Motion commits its transform on the next frame; native input must follow that position.
     requestAnimationFrame(() => {
-      void setOverlayInput([visualBox.current, cardBox.current].flatMap((el) => {
+      void setOverlayInput([visualBox.current, cardBox.current, sketchBox.current].flatMap((el) => {
         if (!el) return [];
         const r = el.getBoundingClientRect();
         return [[Math.floor(r.left), Math.floor(r.top), Math.ceil(r.width), Math.ceil(r.height)] as [number, number, number, number]];
@@ -109,6 +118,7 @@ export default function OverlayPage() {
     let cardId = 0;
     let clearing = false;
     let timers: number[] = [];
+    let transientExpiry: number | undefined;
     const demoTimers: number[] = [];
     let disposed = false;
     let off = () => {};
@@ -124,6 +134,7 @@ export default function OverlayPage() {
 
     const clearScene = () => {
       run += 1;
+      window.clearTimeout(transientExpiry);
       stopTimers();
       pointer.current?.clear();
       clearing = true;
@@ -133,6 +144,7 @@ export default function OverlayPage() {
         setScene((s) => ({ id: s.id, marks: [] }));
         setCard(null);
         setVisual(null);
+        setAnnotations([]);
         setFading(false);
       });
     };
@@ -158,15 +170,20 @@ export default function OverlayPage() {
         setScene((s) => ({ id: s.id, marks: [] }));
         setCard(null);
         setVisual(null);
+        setAnnotations([]);
       }
       setFading(false);
       // Marks fade on their own. A scene or card stays until its red button is pressed.
-      if (cmd.kind !== "scene" && cmd.kind !== "card") later(IDLE_MS, clearScene);
+      if (cmd.kind !== "scene" && cmd.kind !== "card") {
+        window.clearTimeout(transientExpiry);
+        transientExpiry=window.setTimeout(()=>{run+=1;pointer.current?.clear();setScene(s=>({...s,marks:[]}));setAnnotations([]);},IDLE_MS);
+      }
       if (cmd.kind === "scene") {
         cardId += 1;
-        setVisual({ id: cardId, scene: cmd.scene });
+        setVisual({ id: cardId, scene: cmd.scene, text:cmd.text });
         return;
       }
+      if (cmd.kind === "annotations") { setAnnotations(readAnnotations(cmd.annotations));return; }
       if (cmd.kind === "card") {
         cardId += 1;
         setCard({ id: cardId, title: cmd.title, lines: cmd.lines });
@@ -206,8 +223,8 @@ export default function OverlayPage() {
 
     const query = new URLSearchParams(window.location.search);
     const which = query.get("scene");
-    if (which === "diagram" || which === "jet") {
-      const demo = which === "jet" ? EXAMPLE_JET : EXAMPLE_DIAGRAM;
+    if (which === "diagram" || which === "jet" || which === "trigonal") {
+      const demo = which === "jet" ? EXAMPLE_JET : which === "trigonal" ? EXAMPLE_TRIGONAL : EXAMPLE_DIAGRAM;
       demoTimers.push(window.setTimeout(() => apply({ kind: "scene", scene: demo }), 400));
     } else if (query.get("demo") === "1") {
       demoTimers.push(window.setTimeout(() => apply({ kind: "marks", marks: DEMO_MARKS }), 300));
@@ -220,13 +237,14 @@ export default function OverlayPage() {
       window.removeEventListener("message", onMessage);
       window.removeEventListener("keydown", onKey);
       stopTimers();
+      window.clearTimeout(transientExpiry);
       demoTimers.forEach((id) => window.clearTimeout(id));
     };
   }, []);
 
   /* The mouse reaches the panels (to turn a model, to press a close button) and nothing else. */
   useEffect(() => {
-    const els = [visualBox.current, cardBox.current].filter((el): el is HTMLDivElement => el !== null);
+    const els = [visualBox.current, cardBox.current, sketchBox.current].filter((el): el is HTMLDivElement => el !== null);
     reportInput();
     const settle = window.setTimeout(reportInput, 400);
     const observer = new ResizeObserver(reportInput);
@@ -237,7 +255,7 @@ export default function OverlayPage() {
       observer.disconnect();
       window.removeEventListener("resize", reportInput);
     };
-  }, [visual, card, reportInput]);
+  }, [visual, card, annotations.length, reportInput]);
 
   return (
     <div ref={viewport} className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -247,6 +265,7 @@ export default function OverlayPage() {
         animate={{ opacity: fading ? 0 : 1 }}
         transition={{ duration: CLEAR_MS / 1000, ease: EASE_OUT }}
       >
+        {!!annotations.length && <><ScreenSketch annotations={annotations}/><div ref={sketchBox} className="pointer-events-auto absolute end-4 top-4"><Button size="small" variant="secondary" onClick={()=>setAnnotations([])}>Clear sketches</Button></div></>}
         {scene.marks.map((item, i) => (
           <motion.div
             key={`${scene.id}-${item.n}`}
@@ -272,7 +291,7 @@ export default function OverlayPage() {
             key={visual.id}
             ref={visualBox}
             className="absolute start-1/2 top-16 -translate-x-1/2"
-            style={{ x: visualX, y: visualY, width: visual.scene.type === "diagram" ? "min(640px, calc(100vw - 3rem))" : "min(860px, calc(100vw - 3rem))" }}
+            style={{ x: visualX, y: visualY, width: visual.scene.type === "diagram" ? "min(640px, calc(100% - 3rem))" : "min(860px, calc(100% - 3rem))" }}
             drag dragControls={visualDrag} dragListener={false} dragMomentum={false} dragElastic={0} dragConstraints={viewport}
             onDrag={reportInput} onDragEnd={reportInput}
             initial={{ opacity: 0 }}
@@ -284,8 +303,12 @@ export default function OverlayPage() {
               {visual.scene.type === "diagram" ? (
                 <DiagramView scene={visual.scene} />
               ) : (
-                <Model3DView scene={visual.scene} className="h-[min(560px,64vh)] w-full" />
+                <Model3DView scene={visual.scene} className="h-[min(460px,50vh)] w-full" />
               )}
+              {visual.text && <div className="relative border-t border-rule bg-paper">
+                <div onScroll={explanationFade.onScroll} className="max-h-[min(180px,23vh)] overflow-y-auto overscroll-contain p-4 select-text"><MessageText text={visual.text}/></div>
+                <ScrollFade progress={explanationFade.progress} surfaceClassName="from-paper"/>
+              </div>}
             </VisualFrame>
           </motion.div>
         ) : null}
@@ -293,7 +316,7 @@ export default function OverlayPage() {
           <motion.div
             key={card.id}
             ref={cardBox}
-            className="absolute end-6 top-28 w-[min(380px,calc(100vw-3rem))]"
+            className="absolute end-6 top-28 w-[min(380px,calc(100%-3rem))]"
             style={{ x: cardX, y: cardY }}
             drag dragControls={cardDrag} dragListener={false} dragMomentum={false} dragElastic={0} dragConstraints={viewport}
             onDrag={reportInput} onDragEnd={reportInput}

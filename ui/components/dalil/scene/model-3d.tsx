@@ -22,6 +22,7 @@ import {
   toneToken,
   type Vec3,
 } from "@/lib/model-3d-layout";
+import { angleArc, placeAngleLabels } from "@/lib/visual-geometry";
 import { cx } from "@/utils/cx";
 
 const FOV_DEG = 30;
@@ -186,6 +187,10 @@ function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer | null {
  */
 export function Model3DView({ scene, className, revealedLabels, onReady }: Model3DViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const arcRefs=useRef<(SVGPathElement|null)[]>([]);
+  const angleLeaderRefs=useRef<(SVGLineElement|null)[]>([]);
+  const angleRefs=useRef<(SVGTextElement|null)[]>([]);
+  const arcs=useMemo(()=>(scene.angles??[]).flatMap(a=>{const arc=angleArc(a);return arc?[{...arc,id:a.id}]:[];}),[scene]);
   const pillRefs = useRef<(HTMLDivElement | null)[]>([]);
   const lineRefs = useRef<(SVGLineElement | null)[]>([]);
   const dotRefs = useRef<(SVGCircleElement | null)[]>([]);
@@ -199,7 +204,7 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
   const resetRef = useRef<() => void>(() => {});
 
   const ordered = useMemo(() => [...scene.labels].sort((a, b) => a.n - b.n), [scene.labels]);
-  const ariaLabel = `${scene.title}. ${ordered.map((label) => `${label.n} ${label.text}`).join(", ")}`;
+  const ariaLabel = `${scene.title}. ${ordered.map((label) => `${label.n} ${label.text}`).join(", ")}. ${arcs.map(arc=>`${arc.degrees} degrees`).join(", ")}`;
 
   useEffect(() => {
     readyRef.current = onReady;
@@ -328,6 +333,22 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
       return { x: ((p.x + 1) / 2) * size.width, y: ((1 - p.y) / 2) * size.height };
     };
     const overlay = () => {
+      const atomObstacles=scene.parts.filter(p=>p.shape==="sphere").map(part=>{
+        const at=toScreen(v.set(...part.pos).applyMatrix4(offset.matrixWorld));
+        const radius=part.shape==="sphere"?part.radius:0;
+        const edge=toScreen(v.set(part.pos[0]+radius,part.pos[1],part.pos[2]).applyMatrix4(offset.matrixWorld));
+        return {...at,radius:Math.max(10,Math.hypot(edge.x-at.x,edge.y-at.y))};
+      });
+      const angleSlots=placeAngleLabels(arcs.map(arc=>toScreen(v.set(...arc.label).applyMatrix4(offset.matrixWorld))),atomObstacles,size);
+      arcs.forEach((arc,i)=>{
+        const points=arc.points.map(p=>toScreen(v.set(...p).applyMatrix4(offset.matrixWorld)));
+        arcRefs.current[i]?.setAttribute("d",points.map((p,n)=>`${n?"L":"M"}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" "));
+        const at=angleSlots[i],middle=points[Math.floor(points.length/2)];
+        angleRefs.current[i]?.setAttribute("x",String(at.x));angleRefs.current[i]?.setAttribute("y",String(at.y));
+        const line=angleLeaderRefs.current[i];
+        line?.setAttribute("x1",String(middle.x));line?.setAttribute("y1",String(middle.y));
+        line?.setAttribute("x2",String(at.x));line?.setAttribute("y2",String(at.y));
+      });
       const box = corners.map((c) => toScreen(v.copy(c).applyMatrix4(offset.matrixWorld)));
       const xs = box.map((p) => p.x);
       const ys = box.map((p) => p.y);
@@ -470,7 +491,7 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
       renderer.forceContextLoss();
       canvas.remove();
     };
-  }, [scene, ordered]);
+  }, [scene, ordered, arcs]);
 
   const shown = revealedLabels ?? (timed?.scene === scene ? timed.count : 0);
 
@@ -485,6 +506,7 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
         <div className="relative flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
           <p className="text-body-regular text-text-secondary">3D view not available on this display</p>
           <ul className="flex flex-col gap-1 font-ink text-[20px] leading-7 text-ink">
+            {arcs.map(arc=><li key={arc.id}>{arc.degrees}°</li>)}
             {ordered.map((label) => (
               <li key={label.n}>{`${label.n} · ${label.text}`}</li>
             ))}
@@ -493,6 +515,11 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
       ) : (
         <>
           <svg aria-hidden="true" className="pointer-events-none absolute inset-0 size-full overflow-visible">
+            {arcs.map((arc,i)=><g key={arc.id}>
+              <path ref={el=>{arcRefs.current[i]=el;}} fill="none" strokeWidth={2.5} strokeLinecap="round" className="stroke-accent-600"/>
+              <line ref={el=>{angleLeaderRefs.current[i]=el;}} strokeWidth={1} className="stroke-accent-600"/>
+              <text ref={el=>{angleRefs.current[i]=el;}} textAnchor="middle" dominantBaseline="middle" strokeWidth={5} paintOrder="stroke" className="stroke-paper fill-ink font-ink text-[23px] font-bold">{arc.degrees}°</text>
+            </g>)}
             {ordered.map((label, i) => (
               <g
                 key={label.n}

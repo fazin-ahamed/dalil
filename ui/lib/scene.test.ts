@@ -251,7 +251,7 @@ describe("scenePrompt", () => {
     assert.deepEqual(sanitizeScene(example), example);
   });
 
-  it("is version 1", () => {
-    assert.equal(SCENE_PROMPT_VERSION, 1);
+  it("is version 2", () => {
+    assert.equal(SCENE_PROMPT_VERSION, 2);
   });
 });

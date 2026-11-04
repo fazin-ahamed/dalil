@@ -96,7 +96,7 @@ export const EMPTY_MODEL: SetupModel = {
   selected: null,
   manual: false,
   manualId: "",
-  useScreenshots: false,
+  useScreenshots: true,
   test: "idle",
   testMessage: null,
   screen: "setup",

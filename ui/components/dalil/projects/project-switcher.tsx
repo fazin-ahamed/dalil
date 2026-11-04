@@ -44,6 +44,7 @@ const NAME_ERRORS: Record<NameProblem, string> = {
 export interface ProjectSwitcherProps {
   /** Every project, in the order they were made. */
   projects: Project[];
+  inline?: boolean;
   /** The project in use, or null for none. */
   activeId: string | null;
   /** Makes a project the one in use, or none for null. The menu closes after a pick. */
@@ -69,7 +70,7 @@ function ActiveMark() {
  * project (with a delete button each) and a form for a new one. It draws the projects it is given and
  * reports every change through its callbacks.
  */
-export function ProjectSwitcher({ projects, activeId, onSelect, onAdd, onDelete }: ProjectSwitcherProps) {
+export function ProjectSwitcher({ projects, activeId, onSelect, onAdd, onDelete, inline = false }: ProjectSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [folder, setFolder] = useState("");
@@ -110,17 +111,7 @@ export function ProjectSwitcher({ projects, activeId, onSelect, onAdd, onDelete 
     setOpen(false);
   };
 
-  return (
-    <Dropdown isOpen={open} onOpenChange={setOpen}>
-      <DropdownTrigger className={TRIGGER}>
-        <RiFolderLine className="size-4 shrink-0 text-foreground-icon-secondary" aria-hidden />
-        <span className="min-w-0 truncate">{active ? active.name : strings.none}</span>
-        <ChevronDownSmall
-          className={cx("size-4 shrink-0 text-text-secondary transition-transform duration-200", open && "rotate-180")}
-        />
-      </DropdownTrigger>
-      {/* The popover is portalled out of the notch, so the night glass class goes on the popover itself. */}
-      <DropdownPopover aria-label={strings.menu} className="dark w-72">
+  const content = <>
         <div ref={listRef} className="flex w-full flex-col gap-1">
           <DropdownItem selected={activeId === null} onSelect={() => pick(null)}>
             <span className="min-w-0 flex-1 truncate text-body-medium">{strings.none}</span>
@@ -170,7 +161,7 @@ export function ProjectSwitcher({ projects, activeId, onSelect, onAdd, onDelete 
             />
             <Input
               label={strings.folder_label}
-              placeholder={strings.folder_placeholder}
+              placeholder={inline ? "C:\\Users\\you\\Documents\\Project" : strings.folder_placeholder}
               value={folder}
               onChange={setFolder}
               inputDir="ltr"
@@ -180,6 +171,21 @@ export function ProjectSwitcher({ projects, activeId, onSelect, onAdd, onDelete 
             </Button>
           </form>
         </DropdownGroup>
+  </>;
+  if (inline) return <div className="flex flex-col gap-3">{content}</div>;
+
+  return (
+    <Dropdown isOpen={open} onOpenChange={setOpen}>
+      <DropdownTrigger className={TRIGGER}>
+        <RiFolderLine className="size-4 shrink-0 text-foreground-icon-secondary" aria-hidden />
+        <span className="min-w-0 truncate">{active ? active.name : strings.none}</span>
+        <ChevronDownSmall
+          className={cx("size-4 shrink-0 text-text-secondary transition-transform duration-200", open && "rotate-180")}
+        />
+      </DropdownTrigger>
+      {/* The popover is portalled out of the notch, so the night glass class goes on the popover itself. */}
+      <DropdownPopover aria-label={strings.menu} className="dark w-72">
+        {content}
       </DropdownPopover>
     </Dropdown>
   );

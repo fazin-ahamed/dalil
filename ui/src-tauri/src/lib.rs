@@ -28,6 +28,7 @@ mod desktop;
 mod memory;
 mod overlay;
 mod projects;
+mod receipts;
 mod voice;
 mod web;
 
@@ -111,7 +112,10 @@ struct SavedEndpoint {
     host: String,
     local: bool,
     model: String,
+    #[serde(default = "screenshots_default")]
     use_screenshots: bool,
+    #[serde(default)]
+    automatic_tools_version: u8,
     header_name: String,
     scheme: String,
     /// Voice settings. Empty means the defaults. `serde(default)` lets older endpoint.json files load.
@@ -144,7 +148,8 @@ fn keyring_entry() -> Result<keyring::Entry, String> {
 /// Writes the endpoint settings to the config dir and the key to the keychain. An empty key
 /// removes any stored key. The key is never written to a file.
 #[tauri::command]
-fn save_endpoint(app: AppHandle, endpoint: SavedEndpoint, key: String) -> Result<(), String> {
+fn save_endpoint(app: AppHandle, mut endpoint: SavedEndpoint, key: String) -> Result<(), String> {
+    endpoint.automatic_tools_version = 1;
     let json = serde_json::to_string_pretty(&endpoint).map_err(|e| e.to_string())?;
     fs::write(config_path(&app)?, json).map_err(|e| e.to_string())?;
     let entry = keyring_entry()?;
@@ -179,12 +184,28 @@ fn screenshot_settings(bytes: &[u8], enabled: bool) -> Result<Vec<u8>, String> {
     serde_json::to_vec_pretty(&saved).map_err(|_| "settings-unavailable".into())
 }
 
+fn screenshots_default() -> bool { true }
+fn upgrade_automatic_tools(endpoint: &mut SavedEndpoint) -> bool {
+    if endpoint.automatic_tools_version != 0 { return false; }
+    endpoint.use_screenshots = true;
+    endpoint.automatic_tools_version = 1;
+    true
+}
+
 /// The saved settings and whether a key is stored. The key itself stays in the keychain.
 #[tauri::command]
 fn load_endpoint(app: AppHandle) -> Result<Option<LoadedEndpoint>, String> {
     let path = config_path(&app)?;
-    let Ok(text) = fs::read_to_string(path) else { return Ok(None) };
-    let endpoint: SavedEndpoint = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let Ok(text) = fs::read_to_string(&path) else { return Ok(None) };
+    let mut endpoint: SavedEndpoint = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    if upgrade_automatic_tools(&mut endpoint) {
+        let tmp = path.with_extension("json.tmp");
+        let mut updated: serde_json::Value = serde_json::from_str(&text).map_err(|_| "settings-unavailable")?;
+        updated["useScreenshots"] = serde_json::Value::Bool(true);
+        updated["automaticToolsVersion"] = serde_json::json!(1);
+        fs::write(&tmp, serde_json::to_vec_pretty(&updated).map_err(|_| "settings-unavailable")?).map_err(|_| "settings-unavailable")?;
+        fs::rename(tmp, &path).map_err(|_| "settings-unavailable")?;
+    }
     let has_key = keyring_entry().ok().and_then(|e| e.get_password().ok()).is_some();
     Ok(Some(LoadedEndpoint { endpoint, has_key }))
 }
@@ -301,6 +322,8 @@ fn watch_pointer(app: AppHandle) {
         let mut last = PointerEvent { inside: false, x: -1, y: -1 };
         loop {
             std::thread::sleep(Duration::from_millis(60));
+            #[cfg(windows)]
+            let _ = context::foreground_window();
             let Some(window) = app.get_webview_window("notch") else { continue };
             let (Ok(cursor), Ok(origin), Ok(size), Ok(scale)) =
                 (app.cursor_position(), window.outer_position(), window.outer_size(), window.scale_factor())
@@ -404,6 +427,8 @@ fn place_notch(app: &AppHandle) {
         }
         let _ = window.set_ignore_cursor_events(true);
     }
+    #[cfg(windows)]
+    { let _ = context::foreground_window(); desktop::exclude_from_capture(&window); }
     let _ = window.show();
     #[cfg(target_os = "linux")]
     if LAYER_SHELL.load(Ordering::Relaxed) {
@@ -490,6 +515,7 @@ pub fn run() {
             memory::memory_add,
             memory::memory_delete,
             memory::memory_clear,
+            receipts::receipt_list,
             projects::project_list,
             projects::project_add,
             projects::project_set_active,
@@ -553,6 +579,17 @@ mod tests {
         assert_eq!(serde_json::from_slice::<serde_json::Value>(&super::screenshot_settings(&updated, false).unwrap()).unwrap(), original);
         assert!(super::screenshot_settings(b"broken", true).is_err());
         assert!(super::screenshot_settings(b"[]", true).is_err());
+    }
+
+    #[test]
+    fn automatic_tools_upgrade_once_and_respect_a_later_screen_opt_out() {
+        let json = r#"{"base":"https://a.example.com/v1","host":"a.example.com","local":false,"model":"m","useScreenshots":false,"headerName":"Authorization","scheme":"Bearer"}"#;
+        let mut endpoint: super::SavedEndpoint = serde_json::from_str(json).unwrap();
+        assert!(super::upgrade_automatic_tools(&mut endpoint));
+        assert!(endpoint.use_screenshots);
+        endpoint.use_screenshots = false;
+        assert!(!super::upgrade_automatic_tools(&mut endpoint));
+        assert!(!endpoint.use_screenshots);
     }
 
     #[test]

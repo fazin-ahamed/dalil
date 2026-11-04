@@ -6,15 +6,15 @@ import { beginComputer, computerAction, computerCapabilities, endComputer, runAg
 import { captureScreen } from "@/lib/capture";
 import { annotate, applyRefinement, refineMessages } from "@/lib/refine";
 import type { ChatBubble } from "@/components/dalil/notch";
-import type { AgentTask, ChatMessage, ContextSnapshot, Project } from "@/lib/contracts";
+import type { AgentTask, ChatMessage, ContextSnapshot, Project, Scene, ScreenBounds, ScreenShot } from "@/lib/contracts";
 import { getContext, shortApp } from "@/lib/context";
 import { addLesson, formatForPrompt, listLessons, recall } from "@/lib/memory";
-import { loadEndpoint, setKeyboard, setScreenshots } from "@/lib/native-bridge";
+import { loadEndpoint, setKeyboard } from "@/lib/native-bridge";
 import { sendOverlay } from "@/lib/overlay";
 import { activeProject, listProjects } from "@/lib/projects";
 import { cancelListening, friendlyVoiceError, onLevel, speak, startListening, stopAndTranscribe, voiceCode, type Speech } from "@/lib/voice";
 
-export type TutorView = "ask" | "listen" | "rest";
+export type TutorView = "ask" | "listen" | "rest" | "thinking";
 const OVERLAY_CLEAR_MS = 450;
 const REFINE_TIMEOUT_MS = 25_000;
 
@@ -30,14 +30,15 @@ export function useTutor(setView: (view: TutorView) => void) {
   const [speaking, setSpeaking] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [level, setLevel] = useState(0);
-  const [searchEnabled, setSearchEnabled] = useState(true);
-  const [computerEnabled, setComputerEnabled] = useState(false);
+  const searchEnabled = true;
   const [screenEnabled, setScreenEnabled] = useState(false);
-  const [screenChanging, setScreenChanging] = useState(false);
   const [capabilities, setCapabilities] = useState<ComputerCapabilities>({ supported: false, reason: "Checking desktop input…" });
   const history = useRef<ChatMessage[]>([]);
   const speech = useRef<Speech | null>(null);
   const drawing = useRef(false);
+  const lastVisual = useRef<Scene | null>(null);
+  const lastScreen = useRef<ScreenBounds | undefined>(undefined);
+  const presenter = useRef<string | null>(null);
   const visible = useRef(false);
   const controllers = useRef(new Map<string, AbortController>());
   const computerTask = useRef<string | null>(null);
@@ -70,20 +71,12 @@ export function useTutor(setView: (view: TutorView) => void) {
     }
   }, []);
   const stopComputer = useCallback(async () => { if (computerTask.current) await stopTask(computerTask.current); }, [stopTask]);
-  const toggleScreen = useCallback(async () => {
-    if (screenChanging) return;
-    const enabled = !screenEnabled;
-    if (!enabled) { stopComputer(); setComputerEnabled(false); }
-    setScreenChanging(true);
-    try { await setScreenshots(enabled); setScreenEnabled(enabled); setError(null); }
-    catch (caught) { setError(friendlyError(caught instanceof Error ? caught.message : String(caught))); }
-    finally { setScreenChanging(false); }
-  }, [screenChanging, screenEnabled, stopComputer]);
   const showVisual = useCallback((id: string) => {
     const scene = messages.find((message) => message.taskId === id && message.role === "assistant")?.scene;
     if (!scene) return;
     drawing.current = true;
-    void sendOverlay({ kind: "scene", scene }).catch(() => setError("Could not open the explanation panel. Try again."));
+    lastVisual.current = scene;
+    void sendOverlay({ kind: "scene", scene }, lastScreen.current).catch(() => setError("Could not open the explanation panel. Try again."));
   }, [messages]);
 
   useEffect(() => {
@@ -127,22 +120,13 @@ export function useTutor(setView: (view: TutorView) => void) {
     setTasks([]);
     setDraft("");
     setError(null);
-    setComputerEnabled(false);
+    lastVisual.current = null;
+    presenter.current = null;
   }, [clearOverlay, stopSpeaking, stopTask]);
-  const toggleComputer = useCallback(() => {
-    if (!computerEnabled && (!capabilities.supported || !screenEnabled)) {
-      setError(!screenEnabled ? friendlyError("computer-no-screen") : capabilities.reason);
-      return;
-    }
-    if (computerEnabled && computerTask.current) stopTask(computerTask.current);
-    setComputerEnabled((on) => !on);
-    setError(null);
-  }, [capabilities, computerEnabled, screenEnabled, stopTask]);
-
   const submit = useCallback(async (text: string, spoken = false) => {
     const question = text.trim();
     if (!question) return;
-    if (controllers.current.size >= 4 || (computerEnabled && controllers.current.size > 0) || computerTask.current) {
+    if (controllers.current.size >= 4 || computerTask.current) {
       setError("Wait for the current computer task, or stop it before starting another. Up to four web tasks can run together.");
       return;
     }
@@ -150,11 +134,13 @@ export function useTutor(setView: (view: TutorView) => void) {
     const controller = new AbortController();
     const { signal } = controller;
     controllers.current.set(id, controller);
-    if (computerEnabled) computerTask.current = id;
+    presenter.current = id;
+    setView("thinking");
+    void setKeyboard(false);
     setError(null);
     stopSpeaking();
     setMessages((all) => [...all, { role: "user", text: question, taskId: id }, { role: "assistant", text: "", taskId: id, status: "running" }]);
-    setTasks((all) => [...all, { id, question, computer: computerEnabled, status: "running", activities: [{ label: "Reading the question and context", status: "running" }] }]);
+    setTasks((all) => [...all, { id, question, computer: false, status: "running", activities: [{ label: "Reading the question and context", status: "running" }] }]);
     setDraft("");
     const task = (patch: Partial<AgentTask>) => setTasks((all) => all.map((t) => t.id === id ? { ...t, ...patch } : t));
     const reply = (patch: Partial<ChatBubble>) => setMessages((all) => all.map((m) => m.taskId === id && m.role === "assistant" ? { ...m, ...patch } : m));
@@ -162,18 +148,14 @@ export function useTutor(setView: (view: TutorView) => void) {
     try {
       const saved = await untilStopped(loadEndpoint(), signal);
       if (!saved) throw new Error("no-endpoint");
-      if (computerEnabled && !saved.useScreenshots) throw new Error("computer-no-screen");
-      if (computerEnabled) {
-        await untilStopped(beginComputer(id), signal);
-        visible.current = false;
-        setView("rest");
-        await setKeyboard(false);
-      }
+
       if (drawing.current) await untilStopped(clearOverlay(), signal);
-      if (computerEnabled) await untilStopped(new Promise((resolve) => setTimeout(resolve, OVERLAY_CLEAR_MS)), signal);
+      await untilStopped(new Promise((resolve) => setTimeout(resolve, OVERLAY_CLEAR_MS)), signal);
       const [ctx, screenshot, active] = await untilStopped(Promise.all([
         getContext(), saved.useScreenshots ? captureScreen() : Promise.resolve(null), listProjects().then(activeProject),
       ]), signal);
+      let latestShot: ScreenShot | null = screenshot;
+      lastScreen.current = screenshot?.screen;
       setContext(ctx);
       setProject(active);
       setScreenEnabled(saved.useScreenshots);
@@ -182,12 +164,29 @@ export function useTutor(setView: (view: TutorView) => void) {
       task({ activities: [{ label: screenshot ? "Read the screen and conversation" : "Read the conversation", status: "done" }, { label: "Working on an answer", status: "running" }] });
       const answer = await runAgent({
         endpoint, userText: question, context: ctx, memory: formatForPrompt(recall(lessons, question, 5, active?.id)),
-        history: history.current, screenshot, projectName: active?.name, tools: { search: searchEnabled, computer: computerEnabled }, signal,
-        act: (action, shot) => computerAction(id, action, shot),
+        history: history.current, screenshot, projectName: active?.name, currentVisual: lastVisual.current,
+        tools: { search: searchEnabled, computer: capabilities.supported && saved.useScreenshots }, signal,
+        act: async (action, shot) => {
+          signal.throwIfAborted();
+          if (computerTask.current !== id) {
+            if (computerTask.current) throw new Error("computer-busy");
+            computerTask.current = id;
+            task({ computer: true });
+            setView("thinking");
+            await setKeyboard(false);
+            await untilStopped(beginComputer(id), signal);
+          }
+          signal.throwIfAborted();
+          if (action.type === "click") await untilStopped(sendOverlay({kind:"point",x:action.x,y:action.y,label:"Working here"},shot.screen),signal);
+          signal.throwIfAborted();
+          await computerAction(id, action, shot);
+        },
         observe: async () => {
           await new Promise((resolve) => setTimeout(resolve, 500));
           signal.throwIfAborted();
-          return captureScreen();
+          latestShot = await captureScreen();
+          lastScreen.current = latestShot?.screen;
+          return latestShot;
         },
         onActivity: (activities) => task({ activities }),
       });
@@ -198,23 +197,32 @@ export function useTutor(setView: (view: TutorView) => void) {
       reply({ text: answer.text, steps: answer.steps, sources: answer.sources, scene: answer.scene, status: "done" });
       answered = true;
 
-      if (visible.current && answer.scene) {
+      if (presenter.current === id && answer.scene) {
+        lastVisual.current = answer.scene;
         drawing.current = true;
-        await sendOverlay({ kind: "scene", scene: answer.scene }).catch(() => setError("The answer is ready, but the explanation panel could not open."));
-      } else if (visible.current && answer.marks.length > 0 && screenshot) {
+        await sendOverlay({ kind: "scene", scene: answer.scene, text: answer.text }, latestShot?.screen).catch(() => setError("The answer is ready, but the explanation panel could not open."));
+      } else if (presenter.current === id && answer.marks.length > 0 && latestShot) {
         const refined = await untilStopped(Promise.race([
-          annotate(screenshot, answer.marks).then((marked) => callDesktop(endpoint, refineMessages(answer.marks, marked)))
+          annotate(latestShot, answer.marks).then((marked) => callDesktop(endpoint, refineMessages(answer.marks, marked)))
             .then((raw) => applyRefinement(answer.marks, raw)).catch(() => answer.marks),
           new Promise<typeof answer.marks>((resolve) => setTimeout(() => resolve(answer.marks), REFINE_TIMEOUT_MS)),
         ]), signal);
-        if (visible.current && refined.length > 0) {
+        if (presenter.current === id && refined.length > 0) {
           drawing.current = true;
-          await sendOverlay({ kind: "marks", marks: refined }).catch(() => setError("The answer is ready, but the screen labels could not open."));
+          await sendOverlay({ kind: "marks", marks: refined, screen: latestShot.screen }).catch(() => setError("The answer is ready, but the screen labels could not open."));
         }
       }
-      if (spoken && visible.current) {
+      if (presenter.current === id && answer.annotations?.length && latestShot) {
+        drawing.current = true;
+        await sendOverlay({kind:"annotations",annotations:answer.annotations,screen:latestShot.screen}).catch(()=>setError("Could not draw the screen sketch."));
+      }
+      if (presenter.current === id) {
+        if (computerTask.current === id) { await endComputer(id).catch(()=>{}); computerTask.current = null; }
+        setView(answer.scene || answer.marks.length || answer.annotations?.length ? "rest" : "ask");
+      }
+      if (spoken && presenter.current === id) {
         void speak(answer.text).then((value) => {
-          if (signal.aborted || !visible.current) value?.stop();
+          if (signal.aborted || presenter.current !== id) value?.stop();
           else {
             speech.current = value;
             setSpeaking(true);
@@ -230,15 +238,17 @@ export function useTutor(setView: (view: TutorView) => void) {
         if (!answered) reply({ status: "stopped", text: "Task stopped. Completed actions are listed above." });
       } else {
         const message = friendlyError(caught instanceof Error ? caught.message : String(caught));
+        if (presenter.current === id) setView("ask");
         task({ status: "error" });
         reply({ status: "error", text: message });
       }
     } finally {
-      if (computerEnabled) await endComputer(id).catch(() => {});
+      if (computerTask.current === id) await endComputer(id).catch(() => {});
+      if (presenter.current === id && signal.aborted) setView("ask");
       controllers.current.delete(id);
       if (computerTask.current === id) computerTask.current = null;
     }
-  }, [clearOverlay, computerEnabled, searchEnabled, setView, stopSpeaking]);
+  }, [capabilities.supported, clearOverlay, searchEnabled, setView, stopSpeaking]);
 
   const toggleTalk = useCallback(async () => {
     if (transcribing) return;
@@ -264,9 +274,9 @@ export function useTutor(setView: (view: TutorView) => void) {
   }, [listening, refresh, setView, stopComputer, stopSpeaking, submit, transcribing]);
 
   return {
-    draft, setDraft, busy, messages, tasks, error, level, listening, speaking, project,
-    contextLabel: context ? shortApp(context) : "", searchEnabled, setSearchEnabled,
-    computerEnabled, toggleComputer, capabilities, screenEnabled, screenChanging, toggleScreen,
+    refresh, draft, setDraft, busy, messages, tasks, error, level, listening, speaking, project,
+    contextLabel: context ? shortApp(context) : "", searchEnabled,
+    capabilities, screenEnabled,
     openAsk, close, submit, toggleTalk, stopTask, stopComputer, showVisual, newChat,
   };
 }

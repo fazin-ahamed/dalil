@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { RiArrowLeftLine, RiArrowRightLine, RiRestartLine } from "@remixicon/react";
+import { Button } from "@/components/base/buttons/button";
 import type { Model3DScene, Part, Tone } from "@/lib/contracts";
 import {
   assembleStart,
@@ -190,6 +192,11 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
   const readyRef = useRef(onReady);
   const [unsupported, setUnsupported] = useState(false);
   const [timed, setTimed] = useState<{ scene: Model3DScene; count: number } | null>(null);
+  /** The tour: null is the overview, otherwise the index of the label being taught. */
+  const [step, setStep] = useState<number | null>(null);
+  const [touched, setTouched] = useState(false);
+  const focusRef = useRef<string | null>(null);
+  const resetRef = useRef<() => void>(() => {});
 
   const ordered = useMemo(() => [...scene.labels].sort((a, b) => a.n - b.n), [scene.labels]);
   const ariaLabel = `${scene.title}. ${ordered.map((label) => `${label.n} ${label.text}`).join(", ")}`;
@@ -211,6 +218,12 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
     timer = window.setTimeout(reveal, ASSEMBLE_MS);
     return () => window.clearTimeout(timer);
   }, [revealedLabels, scene, ordered.length]);
+
+  /* The part of the label being taught stays bright and the rest fade back. */
+  useEffect(() => {
+    const target = step === null ? undefined : ordered[step]?.target;
+    focusRef.current = typeof target === "string" ? target : null;
+  }, [step, ordered]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -282,16 +295,20 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
     };
 
     const size = { width: 1, height: 1 };
+    /* What the person has changed by hand: tilt, zoom and a turn that stops the slow spin. */
+    const view = { elevation: VIEW_ELEVATION, zoom: 1, driven: false };
+    const placeCamera = () => {
+      const distance = cameraDistance(boundsRadius(bounds) * 0.72, FOV_DEG, camera.aspect) * view.zoom;
+      camera.position.set(...orbitPosition(distance, VIEW_AZIMUTH, view.elevation));
+      camera.lookAt(0, 0, 0);
+      camera.updateProjectionMatrix();
+    };
     const resize = () => {
       size.width = Math.max(1, host.clientWidth);
       size.height = Math.max(1, host.clientHeight);
       renderer.setSize(size.width, size.height, false);
       camera.aspect = size.width / size.height;
-      camera.position.set(
-        ...orbitPosition(cameraDistance(boundsRadius(bounds) * 0.72, FOV_DEG, camera.aspect), VIEW_AZIMUTH, VIEW_ELEVATION),
-      );
-      camera.lookAt(0, 0, 0);
-      camera.updateProjectionMatrix();
+      placeCamera();
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -346,6 +363,59 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
     const started = performance.now();
     let last = started;
     let angle = 0;
+
+    /* Drag turns and tilts the model, the wheel zooms, a double click puts the view back. */
+    let drag: { x: number; y: number } | null = null;
+    const onDown = (e: PointerEvent) => {
+      drag = { x: e.clientX, y: e.clientY };
+      view.driven = true;
+      setTouched(true);
+      host.setPointerCapture(e.pointerId);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!drag) return;
+      angle += (e.clientX - drag.x) * 0.012;
+      view.elevation = Math.min(80, Math.max(-60, view.elevation + (e.clientY - drag.y) * 0.3));
+      drag = { x: e.clientX, y: e.clientY };
+      placeCamera();
+    };
+    const onUp = () => {
+      drag = null;
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      view.zoom = Math.min(2.2, Math.max(0.45, view.zoom * (e.deltaY > 0 ? 1.08 : 0.92)));
+      view.driven = true;
+      setTouched(true);
+      placeCamera();
+    };
+    const reset = () => {
+      view.elevation = VIEW_ELEVATION;
+      view.zoom = 1;
+      view.driven = false;
+      setTouched(false);
+      placeCamera();
+    };
+    resetRef.current = reset;
+    host.addEventListener("pointerdown", onDown);
+    host.addEventListener("pointermove", onMove);
+    host.addEventListener("pointerup", onUp);
+    host.addEventListener("pointercancel", onUp);
+    host.addEventListener("wheel", onWheel, { passive: false });
+    host.addEventListener("dblclick", reset);
+
+    const byId = new Map(scene.parts.map((part, i) => [part.id, anims[i]]));
+    let applied: string | null | undefined;
+    const applyFocus = () => {
+      if (assembling || applied === focusRef.current) return;
+      applied = focusRef.current;
+      for (const [id, a] of byId) {
+        const dim = applied !== null && id !== applied;
+        const opacity = dim ? Math.min(a.opacity, 0.18) : a.opacity;
+        a.material.opacity = opacity;
+        a.material.transparent = opacity < 1;
+      }
+    };
     let frame = 0;
     let ready = false;
     const tick = (now: number) => {
@@ -354,11 +424,12 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
         return;
       }
       const elapsed = now - started;
-      if (spinning) angle += spinRate(elapsed) * Math.min((now - last) / 1000, 0.1);
+      if (spinning && !view.driven) angle += spinRate(elapsed) * Math.min((now - last) / 1000, 0.1);
       last = now;
       spin.rotation.y = angle;
       spin.updateMatrixWorld(true);
       if (assembling) assemble(elapsed);
+      else applyFocus();
       if (clip) clipWorld.copy(clipLocal).applyMatrix4(offset.matrixWorld);
       renderer.render(stage, camera);
       overlay();
@@ -382,6 +453,12 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener("visibilitychange", onVisibility);
+      host.removeEventListener("pointerdown", onDown);
+      host.removeEventListener("pointermove", onMove);
+      host.removeEventListener("pointerup", onUp);
+      host.removeEventListener("pointercancel", onUp);
+      host.removeEventListener("wheel", onWheel);
+      host.removeEventListener("dblclick", reset);
       observer.disconnect();
       stage.traverse((node) => {
         if (node instanceof THREE.Mesh) {
@@ -403,7 +480,7 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
       aria-label={unsupported ? undefined : ariaLabel}
       className={cx("relative isolate w-full min-h-64", className)}
     >
-      <div ref={hostRef} className="absolute inset-0" />
+      <div ref={hostRef} className="absolute inset-x-0 top-0 bottom-20 cursor-grab touch-none active:cursor-grabbing" />
       {unsupported ? (
         <div className="relative flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
           <p className="text-body-regular text-text-secondary">3D view not available on this display</p>
@@ -421,7 +498,8 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
                 key={label.n}
                 className={cx(
                   "transition-opacity duration-240 ease-dalil-out motion-reduce:duration-0",
-                  i < shown ? "opacity-100" : "opacity-0",
+                  i >= shown ? "opacity-0" : step === null || step === i ? "opacity-100" : "opacity-40",
+                  step === i && "scale-110",
                 )}
               >
                 <line
@@ -465,8 +543,66 @@ export function Model3DView({ scene, className, revealedLabels, onReady }: Model
               </span>
             </div>
           ))}
+          <CaptionBar scene={scene} ordered={ordered} step={step} setStep={setStep} touched={touched} onReset={() => resetRef.current()} />
         </>
       )}
+    </div>
+  );
+}
+
+/** The lesson under the model: the overview, then each label with its caption, Back and Next. */
+function CaptionBar({
+  scene,
+  ordered,
+  step,
+  setStep,
+  touched,
+  onReset,
+}: {
+  scene: Model3DScene;
+  ordered: Model3DScene["labels"];
+  step: number | null;
+  setStep: (step: number | null) => void;
+  touched: boolean;
+  onReset: () => void;
+}) {
+  const current = step === null ? null : ordered[step];
+  const last = ordered.length - 1;
+  const heading = current ? `${current.n} · ${current.text}` : scene.title;
+  const body = current ? current.caption : (scene.intro ?? "Drag to turn it, scroll to zoom. Press Start to go through the parts.");
+  return (
+    <div
+      className="pointer-events-auto absolute inset-x-3 bottom-3 flex items-center gap-3 rounded-2xl border border-separator-border bg-background-primary-default px-3.5 py-2.5 shadow-card"
+      onPointerDown={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
+    >
+      <div className="min-w-0 flex-1" aria-live="polite">
+        <p className="text-headline-medium text-text-primary">{heading}</p>
+        {body && <p className="text-body-regular text-text-secondary">{body}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {touched && (
+          <Button size="small" variant="secondary" leadingIcon={RiRestartLine} aria-label="Reset the view" onClick={onReset} />
+        )}
+        {ordered.length > 0 && step !== null && (
+          <Button
+            size="small"
+            variant="secondary"
+            leadingIcon={RiArrowLeftLine}
+            aria-label="Previous part"
+            onClick={() => setStep(step === 0 ? null : step - 1)}
+          />
+        )}
+        {ordered.length > 0 && (
+          <Button
+            size="small"
+            trailingIcon={step === last ? undefined : RiArrowRightLine}
+            onClick={() => setStep(step === null ? 0 : step === last ? null : step + 1)}
+          >
+            {step === null ? "Start" : step === last ? "Done" : "Next"}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

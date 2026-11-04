@@ -102,6 +102,8 @@ export interface Label3D {
   text: string;
   target: string | [number, number, number];
   tone?: Tone;
+  /** One or two sentences taught when the person steps to this label: what the part does and why it matters. */
+  caption?: string;
 }
 
 /** A labelled 3D model, like a jet engine cutaway with "1 Fan, 2 Compressor, 3 Combustor, 4 Turbine". */
@@ -114,6 +116,8 @@ export interface Model3DScene {
   cutaway?: boolean;
   /** Turn slowly. Default true. */
   spin?: boolean;
+  /** One sentence on what the whole thing does, shown before the tour of labels starts. */
+  intro?: string;
 }
 
 export type Scene = DiagramScene | Model3DScene;

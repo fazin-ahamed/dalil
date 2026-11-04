@@ -8,6 +8,13 @@ const HIDE_AFTER_CLEAR_MS = 400;
  * Sends one command to the overlay window and shows that window for it. A clear fades the scene out
  * and then hides the window. Does nothing outside the desktop app.
  */
+/** Lets the mouse reach these rectangles (window pixels) on the overlay and nowhere else. [] = click-through. */
+export async function setOverlayInput(rects: [number, number, number, number][]): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("overlay_set_input", { rects });
+}
+
 export async function sendOverlay(cmd: OverlayCommand): Promise<void> {
   if (!isTauri()) return;
   const { invoke } = await import("@tauri-apps/api/core");

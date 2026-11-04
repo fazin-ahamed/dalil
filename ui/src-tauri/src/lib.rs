@@ -443,6 +443,7 @@ pub fn run() {
             context::active_context,
             overlay::overlay_show,
             overlay::overlay_hide,
+            overlay::overlay_set_input,
             voice::voice_start,
             voice::voice_cancel,
             voice::voice_stop,

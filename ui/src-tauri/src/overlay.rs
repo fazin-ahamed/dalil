@@ -65,6 +65,29 @@ pub fn overlay_show(app: AppHandle) -> Result<(), String> {
     window.show().map_err(|e| e.to_string())
 }
 
+/// Lets the mouse reach the panels Dalil draws (a model to turn, a close button) and nowhere else.
+/// Each rectangle is `[x, y, width, height]` in window pixels. An empty list makes the overlay
+/// click-through again. On a layer-shell desktop this is an input region. Elsewhere the whole window
+/// takes the mouse while a panel is open, so the red close button is how to get the screen back.
+#[tauri::command]
+pub fn overlay_set_input(app: AppHandle, rects: Vec<[i32; 4]>) -> Result<(), String> {
+    let window = app.get_webview_window(LABEL).ok_or("overlay-missing")?;
+    #[cfg(target_os = "linux")]
+    if super::LAYER_SHELL.load(std::sync::atomic::Ordering::Relaxed) {
+        let target = window.clone();
+        return window
+            .run_on_main_thread(move || {
+                use gtk::prelude::WidgetExt;
+                let Ok(gtk_window) = target.gtk_window() else { return };
+                let list: Vec<gtk::cairo::RectangleInt> =
+                    rects.iter().map(|r| gtk::cairo::RectangleInt::new(r[0], r[1], r[2], r[3])).collect();
+                gtk_window.input_shape_combine_region(Some(&gtk::cairo::Region::create_rectangles(&list)));
+            })
+            .map_err(|e| e.to_string());
+    }
+    window.set_ignore_cursor_events(rects.is_empty()).map_err(|e| e.to_string())
+}
+
 /// Hides the overlay. The window stays alive, so the next `overlay_show` is instant.
 #[tauri::command]
 pub fn overlay_hide(app: AppHandle) -> Result<(), String> {

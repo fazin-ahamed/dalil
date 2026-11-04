@@ -232,8 +232,8 @@ describe("sanitizeScene on garbage", () => {
 describe("scenePrompt", () => {
   const prompt = scenePrompt();
 
-  it("is under 2800 characters and has no em dash or en dash", () => {
-    assert.ok(prompt.length < 2800, `${prompt.length} characters`);
+  it("is under 3300 characters and has no em dash or en dash", () => {
+    assert.ok(prompt.length < 3300, `${prompt.length} characters`);
     const dashCodes = [0x2013, 0x2014];
     assert.ok(![...prompt].some((char) => dashCodes.includes(char.codePointAt(0) ?? 0)));
   });

@@ -53,11 +53,12 @@ export const EXAMPLE_JET: Model3DScene = {
     { id: "nozzle", shape: "cylinder", pos: [5.4, 0, 0], length: 1.2, radiusTop: 0.9, radiusBottom: 2, tone: "ink" },
   ],
   labels: [
-    { n: 1, text: "Fan", target: "fan" },
-    { n: 2, text: "Compressor", target: "comp-2" },
-    { n: 3, text: "Combustor", target: "combustor" },
-    { n: 4, text: "Turbine", target: "turbine" },
+    { n: 1, text: "Fan", target: "fan", caption: "The fan pulls air in. Most of it flows round the engine and makes the thrust, and the rest goes inside." },
+    { n: 2, text: "Compressor", target: "comp-2", caption: "Rings of smaller blades squeeze the air into a tighter space, so it burns hotter and harder." },
+    { n: 3, text: "Combustor", target: "combustor", caption: "Fuel is sprayed into the squeezed air and lit. The gas expands and rushes backwards." },
+    { n: 4, text: "Turbine", target: "turbine", caption: "The hot gas spins the turbine, which turns the shaft that drives the fan and the compressor." },
   ],
+  intro: "A jet engine pulls air in, squeezes it, burns fuel in it and uses the exhaust to push the plane forward.",
   cutaway: true,
   spin: true,
 };
@@ -70,6 +71,8 @@ const TITLE_MAX = 60;
 const SHORT_MAX = 60;
 const NOTE_TEXT_MAX = 80;
 const LABEL_TEXT_MAX = 28;
+const CAPTION_MAX = 200;
+const INTRO_MAX = 160;
 const MAX_ITEMS = 24;
 const MAX_PARTS = 60;
 const MAX_LABELS = 8;
@@ -279,7 +282,8 @@ function labelOf(raw: unknown, partIds: ReadonlySet<string>): Label3D | null {
   const target = targetOf(entry.target, partIds);
   if (n === null || !Number.isInteger(n) || n < 1 || n > MAX_LABELS || text === null || target === null) return null;
   const tone = toneOf(entry.tone);
-  return { n, text, target, ...(tone ? { tone } : {}) };
+  const caption = textOf(entry.caption, CAPTION_MAX);
+  return { n, text, target, ...(tone ? { tone } : {}), ...(caption ? { caption } : {}) };
 }
 
 /** The labels that survive, in n order, at most 8, numbered 1 to k. */
@@ -303,6 +307,8 @@ function model3dOf(raw: Json): Model3DScene | null {
     labels: labelsOf(raw.labels, new Set(parts.map((part) => part.id))),
   };
   if (typeof raw.cutaway === "boolean") scene.cutaway = raw.cutaway;
+  const intro = textOf(raw.intro, INTRO_MAX);
+  if (intro) scene.intro = intro;
   if (typeof raw.spin === "boolean") scene.spin = raw.spin;
   return scene;
 }
@@ -351,7 +357,7 @@ Each part has a unique "id", a "shape", "pos": [x, y, z] and an optional "tone".
 - "torus": "radius" and "tube", each 0.02 to 12. A ring round the x axis unless "rot" turns it.
 - "blades": "count" (3 to 48), "innerRadius", "outerRadius" and "thickness", each 0.02 to 12. A ring of flat blades round the x axis, like a fan.
 "rot" is [x, y, z] in radians, for box, cylinder and torus only.
-Each label has "n" (1 to 8), "text" (max 28 characters) and "target": a part id or an [x, y, z] point.
+Each label has "n" (1 to 8), "text" (max 28 characters), "target": a part id or an [x, y, z] point, and "caption": one or two plain sentences (max 200) on what that part does and why it matters. The model may have an "intro", one sentence (max 160) on what the whole thing does. The person steps through the labels one by one and reads each caption, so write them as a short lesson in order.
 
 Tones: blue, rose, mint, sand, lilac, ink.
 

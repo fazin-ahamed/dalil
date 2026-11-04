@@ -7,11 +7,13 @@ import { GuideCard } from "@/components/dalil/cards/guide-card";
 import { RoughFilters } from "@/components/dalil/cards/rough-filters";
 import { DiagramView } from "@/components/dalil/scene/diagram-view";
 import { Model3DView } from "@/components/dalil/scene/model-3d";
+import { CloseDot, VisualFrame } from "@/components/dalil/scene/visual-frame";
 import { MarkLabel } from "@/components/dalil/overlay/mark-label";
 import { PointerLayer, type PointerLayerHandle } from "@/components/dalil/pointer/pointer-layer";
 import type { Mark, OverlayCommand, Scene as VisualScene } from "@/lib/contracts";
 import { EXAMPLE_DIAGRAM, EXAMPLE_JET } from "@/lib/scene";
 import { isTauri } from "@/lib/native-bridge";
+import { setOverlayInput } from "@/lib/overlay";
 import { layoutMarks, toPixels, type MarkLayout } from "@/lib/overlay-layout";
 
 /** The scene forgets itself after this long with no new command. */
@@ -65,6 +67,8 @@ export default function OverlayPage() {
   const [card, setCard] = useState<CardScene | null>(null);
   const [visual, setVisual] = useState<Visual | null>(null);
   const [fading, setFading] = useState(false);
+  const visualBox = useRef<HTMLDivElement>(null);
+  const cardBox = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     /* Everything below lives in this closure: the timers and the flight counter are plain variables. */
@@ -123,7 +127,8 @@ export default function OverlayPage() {
         setVisual(null);
       }
       setFading(false);
-      later(IDLE_MS, clearScene);
+      // Marks fade on their own. A scene or card stays until its red button is pressed.
+      if (cmd.kind !== "scene" && cmd.kind !== "card") later(IDLE_MS, clearScene);
       if (cmd.kind === "scene") {
         cardId += 1;
         setVisual({ id: cardId, scene: cmd.scene });
@@ -183,6 +188,26 @@ export default function OverlayPage() {
     };
   }, []);
 
+  /* The mouse reaches the panels (to turn a model, to press a close button) and nothing else. */
+  useEffect(() => {
+    const els = [visualBox.current, cardBox.current].filter((el): el is HTMLDivElement => el !== null);
+    const report = () =>
+      void setOverlayInput(
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return [Math.floor(r.left), Math.floor(r.top), Math.ceil(r.width), Math.ceil(r.height)] as [number, number, number, number];
+        }),
+      );
+    report();
+    const settle = window.setTimeout(report, 400);
+    const observer = new ResizeObserver(report);
+    els.forEach((el) => observer.observe(el));
+    return () => {
+      window.clearTimeout(settle);
+      observer.disconnect();
+    };
+  }, [visual, card]);
+
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       <RoughFilters />
@@ -214,27 +239,32 @@ export default function OverlayPage() {
         {visual ? (
           <motion.div
             key={visual.id}
-            className="absolute start-1/2 top-24 -translate-x-1/2"
-            style={{ width: visual.scene.type === "diagram" ? "min(620px, calc(100vw - 3rem))" : "min(860px, calc(100vw - 3rem))" }}
+            ref={visualBox}
+            className="absolute start-1/2 top-16 -translate-x-1/2"
+            style={{ width: visual.scene.type === "diagram" ? "min(640px, calc(100vw - 3rem))" : "min(860px, calc(100vw - 3rem))" }}
             initial={{ opacity: 0, y: reduced ? 0 : 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.24, ease: EASE_OUT }}
           >
-            {visual.scene.type === "diagram" ? (
-              <DiagramView scene={visual.scene} />
-            ) : (
-              <Model3DView scene={visual.scene} className="h-[min(520px,60vh)] w-full" />
-            )}
+            <VisualFrame title={visual.scene.title || "Dalil"} onClose={() => setVisual(null)}>
+              {visual.scene.type === "diagram" ? (
+                <DiagramView scene={visual.scene} />
+              ) : (
+                <Model3DView scene={visual.scene} className="h-[min(560px,64vh)] w-full" />
+              )}
+            </VisualFrame>
           </motion.div>
         ) : null}
         {card ? (
           <motion.div
             key={card.id}
+            ref={cardBox}
             className="absolute end-6 top-28 w-[min(380px,calc(100vw-3rem))]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.2, ease: EASE_OUT }}
           >
+            <CloseDot label={`Close ${card.title}`} onClose={() => setCard(null)} className="absolute start-3 top-3 z-10" />
             <GuideCard
               type="checklist"
               data={{ strip: "Dalil", heading: card.title, items: card.lines }}

@@ -22,6 +22,7 @@ url = "2"
 cpal = "0.15"
 hound = "3"
 base64 = "0.22"
+quick-xml = { version = "0.42", features = ["serialize"] }
 
 [profile.release]
 lto = true
@@ -40,5 +41,6 @@ tauri-plugin-single-instance = "2"
 
 # Windows reads the foreground window title for the tutor's context (src/context.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }
 jpeg-encoder = "0.6"

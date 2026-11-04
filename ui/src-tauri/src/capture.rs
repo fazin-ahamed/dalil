@@ -1,4 +1,4 @@
-//! Screen capture for the tutor. Linux only for now. niri names the focused output and grim takes one JPEG
+//! Screen capture for the tutor on Linux and Windows. niri names the focused output and grim takes one JPEG
 //! of it; only when that fails does grim take the whole desktop. The image is never logged or saved. It goes
 //! back to the page as a data URL, and from there to the endpoint the person chose.
 
@@ -34,12 +34,15 @@ pub struct ScreenShotOut {
     data_url: String,
     width: u32,
     height: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    screen: Option<crate::computer::ScreenBounds>,
 }
 
-/// The focused screen as a JPEG data URL. Linux only for now; other platforms answer capture-unavailable.
+/// The focused screen as a JPEG data URL. Linux and Windows; other platforms answer capture-unavailable.
 /// The capture waits on helper processes, so it runs on a blocking thread.
 #[tauri::command]
-pub async fn capture_screen() -> Result<ScreenShotOut, String> {
+pub async fn capture_screen(app: tauri::AppHandle) -> Result<ScreenShotOut, String> {
+    if !screenshots_allowed(&app) { return Err("screenshots-disabled".into()); }
     #[cfg(target_os = "linux")]
     return tauri::async_runtime::spawn_blocking(capture_focused)
         .await
@@ -50,6 +53,12 @@ pub async fn capture_screen() -> Result<ScreenShotOut, String> {
         .map_err(|_| "capture-unavailable".to_string())?;
     #[cfg(not(any(target_os = "linux", windows)))]
     return Err("capture-unavailable".into());
+}
+
+pub(crate) fn screenshots_allowed(app: &tauri::AppHandle) -> bool {
+    crate::config_path(app).ok().and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|saved| saved["useScreenshots"].as_bool() == Some(true))
 }
 
 /// Windows: the monitor holding the foreground window, copied with GDI and shrunk so the long edge is at
@@ -72,7 +81,7 @@ fn capture_focused_windows() -> Result<ScreenShotOut, String> {
     let fail = || "capture-unavailable".to_string();
     // SAFETY: plain GDI calls. Every handle is checked and released before returning, and `pixels` is
     // sized for `w * h` 32-bit pixels, which is what GetDIBits is told it may write.
-    let (pixels, w, h) = unsafe {
+    let (pixels, w, h, bounds) = unsafe {
         let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
         let mut info: MONITORINFO = zeroed();
         info.cbSize = size_of::<MONITORINFO>() as u32;
@@ -122,7 +131,7 @@ fn capture_focused_windows() -> Result<ScreenShotOut, String> {
         if !copied {
             return Err(fail());
         }
-        (pixels, w, h)
+        (pixels, w, h, crate::computer::ScreenBounds { x: area.left, y: area.top, width: src_w, height: src_h })
     };
 
     // GDI hands back blue, green, red, unused. The encoder takes that order as it is.
@@ -134,18 +143,24 @@ fn capture_focused_windows() -> Result<ScreenShotOut, String> {
         return Err("too-large".into());
     }
     let data_url = format!("data:image/jpeg;base64,{}", STANDARD.encode(&jpeg));
-    Ok(ScreenShotOut { data_url, width: w as u32, height: h as u32 })
+    Ok(ScreenShotOut { data_url, width: w as u32, height: h as u32, screen: Some(bounds) })
 }
 
 /// niri names the focused output and grim takes it, scaled so the long edge is at most `MAX_EDGE`. If that
 /// fails, grim takes every output at half size as the last resort. An image over `MAX_IMAGE_BYTES` is too-large.
 #[cfg(target_os = "linux")]
 fn capture_focused() -> Result<ScreenShotOut, String> {
-    let focused = run("niri", &["msg", "--json", "focused-output"]).and_then(|json| parse_focused(&json));
+    let info = run("niri", &["msg", "--json", "focused-output"]);
+    let screen = info.as_deref().and_then(|json| serde_json::from_slice::<Value>(json).ok())
+        .and_then(|output| crate::computer::niri_bounds(&output));
+    let focused = info.as_deref().and_then(parse_focused);
+    let mut focused_capture = false;
     let image = focused
         .and_then(|(name, logical)| {
             let scale = format!("{:.3}", grim_scale(logical));
-            run("grim", &["-o", name.as_str(), "-s", scale.as_str(), "-t", "jpeg", "-q", "70", "-"])
+            let image = run("grim", &["-o", name.as_str(), "-s", scale.as_str(), "-t", "jpeg", "-q", "70", "-"]);
+            focused_capture = image.is_some();
+            image
         })
         .or_else(|| run("grim", &["-s", "0.500", "-t", "jpeg", "-q", "70", "-"]))
         .ok_or("capture-unavailable")?;
@@ -154,7 +169,7 @@ fn capture_focused() -> Result<ScreenShotOut, String> {
     }
     let (width, height) = jpeg_size(&image).ok_or("capture-unavailable")?;
     let data_url = format!("data:image/jpeg;base64,{}", STANDARD.encode(&image));
-    Ok(ScreenShotOut { data_url, width, height })
+    Ok(ScreenShotOut { data_url, width, height, screen: if focused_capture { screen } else { None } })
 }
 
 /// Runs a helper and returns its stdout. None when it cannot start, fails, prints nothing, or is still

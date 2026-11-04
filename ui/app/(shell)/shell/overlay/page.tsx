@@ -1,13 +1,13 @@
 "use client";
 
 import "../shell.css";
-import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { motion, useReducedMotion, useDragControls, useMotionValue } from "motion/react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { GuideCard } from "@/components/dalil/cards/guide-card";
 import { RoughFilters } from "@/components/dalil/cards/rough-filters";
 import { DiagramView } from "@/components/dalil/scene/diagram-view";
 import { Model3DView } from "@/components/dalil/scene/model-3d";
-import { CloseDot, VisualFrame } from "@/components/dalil/scene/visual-frame";
+import { VisualFrame } from "@/components/dalil/scene/visual-frame";
 import { MarkLabel } from "@/components/dalil/overlay/mark-label";
 import { PointerLayer, type PointerLayerHandle } from "@/components/dalil/pointer/pointer-layer";
 import type { Mark, OverlayCommand, Scene as VisualScene } from "@/lib/contracts";
@@ -69,6 +69,39 @@ export default function OverlayPage() {
   const [fading, setFading] = useState(false);
   const visualBox = useRef<HTMLDivElement>(null);
   const cardBox = useRef<HTMLDivElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+  const visualDrag = useDragControls();
+  const cardDrag = useDragControls();
+  const visualX = useMotionValue(0);
+  const visualY = useMotionValue(0);
+  const cardX = useMotionValue(0);
+  const cardY = useMotionValue(0);
+  useEffect(() => { visualX.set(0); visualY.set(0); }, [visual?.id, visualX, visualY]);
+  useEffect(() => { cardX.set(0); cardY.set(0); }, [card?.id, cardX, cardY]);
+  const reportInput = useCallback(() => {
+    // Motion commits its transform on the next frame; native input must follow that position.
+    requestAnimationFrame(() => {
+      void setOverlayInput([visualBox.current, cardBox.current].flatMap((el) => {
+        if (!el) return [];
+        const r = el.getBoundingClientRect();
+        return [[Math.floor(r.left), Math.floor(r.top), Math.ceil(r.width), Math.ceil(r.height)] as [number, number, number, number]];
+      })).catch(() => {});
+    });
+  }, []);
+  const moveByKey = (event: KeyboardEvent<HTMLButtonElement>, kind: "visual" | "card") => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const box = (kind === "visual" ? visualBox : cardBox).current?.getBoundingClientRect();
+    if (!box) return;
+    const amount = event.shiftKey ? 40 : 16;
+    const dx = event.key === "ArrowLeft" ? -amount : event.key === "ArrowRight" ? amount : 0;
+    const dy = event.key === "ArrowUp" ? -amount : event.key === "ArrowDown" ? amount : 0;
+    const x = kind === "visual" ? visualX : cardX;
+    const y = kind === "visual" ? visualY : cardY;
+    x.set(x.get() + Math.max(-box.left, Math.min(dx, window.innerWidth - box.right)));
+    y.set(y.get() + Math.max(-box.top, Math.min(dy, window.innerHeight - box.bottom)));
+    requestAnimationFrame(reportInput);
+  };
 
   useEffect(() => {
     /* Everything below lives in this closure: the timers and the flight counter are plain variables. */
@@ -156,6 +189,8 @@ export default function OverlayPage() {
       const data: unknown = event.data;
       if (data && typeof data === "object" && "kind" in data) apply(data as OverlayCommand);
     };
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") clearScene(); };
+    window.addEventListener("keydown", onKey);
 
     if (isTauri()) {
       void import("@tauri-apps/api/event")
@@ -183,6 +218,7 @@ export default function OverlayPage() {
       disposed = true;
       off();
       window.removeEventListener("message", onMessage);
+      window.removeEventListener("keydown", onKey);
       stopTimers();
       demoTimers.forEach((id) => window.clearTimeout(id));
     };
@@ -191,25 +227,20 @@ export default function OverlayPage() {
   /* The mouse reaches the panels (to turn a model, to press a close button) and nothing else. */
   useEffect(() => {
     const els = [visualBox.current, cardBox.current].filter((el): el is HTMLDivElement => el !== null);
-    const report = () =>
-      void setOverlayInput(
-        els.map((el) => {
-          const r = el.getBoundingClientRect();
-          return [Math.floor(r.left), Math.floor(r.top), Math.ceil(r.width), Math.ceil(r.height)] as [number, number, number, number];
-        }),
-      );
-    report();
-    const settle = window.setTimeout(report, 400);
-    const observer = new ResizeObserver(report);
+    reportInput();
+    const settle = window.setTimeout(reportInput, 400);
+    const observer = new ResizeObserver(reportInput);
     els.forEach((el) => observer.observe(el));
+    window.addEventListener("resize", reportInput);
     return () => {
       window.clearTimeout(settle);
       observer.disconnect();
+      window.removeEventListener("resize", reportInput);
     };
-  }, [visual, card]);
+  }, [visual, card, reportInput]);
 
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div ref={viewport} className="pointer-events-none absolute inset-0 overflow-hidden">
       <RoughFilters />
       <motion.div
         className="absolute inset-0"
@@ -241,12 +272,15 @@ export default function OverlayPage() {
             key={visual.id}
             ref={visualBox}
             className="absolute start-1/2 top-16 -translate-x-1/2"
-            style={{ width: visual.scene.type === "diagram" ? "min(640px, calc(100vw - 3rem))" : "min(860px, calc(100vw - 3rem))" }}
-            initial={{ opacity: 0, y: reduced ? 0 : 8 }}
-            animate={{ opacity: 1, y: 0 }}
+            style={{ x: visualX, y: visualY, width: visual.scene.type === "diagram" ? "min(640px, calc(100vw - 3rem))" : "min(860px, calc(100vw - 3rem))" }}
+            drag dragControls={visualDrag} dragListener={false} dragMomentum={false} dragElastic={0} dragConstraints={viewport}
+            onDrag={reportInput} onDragEnd={reportInput}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             transition={{ duration: 0.24, ease: EASE_OUT }}
           >
-            <VisualFrame title={visual.scene.title || "Dalil"} onClose={() => setVisual(null)}>
+            <VisualFrame title={visual.scene.title || "Dalil"} onClose={() => setVisual(null)}
+              onMoveStart={(event) => visualDrag.start(event)} onMoveKey={(event) => moveByKey(event, "visual")}>
               {visual.scene.type === "diagram" ? (
                 <DiagramView scene={visual.scene} />
               ) : (
@@ -260,17 +294,21 @@ export default function OverlayPage() {
             key={card.id}
             ref={cardBox}
             className="absolute end-6 top-28 w-[min(380px,calc(100vw-3rem))]"
+            style={{ x: cardX, y: cardY }}
+            drag dragControls={cardDrag} dragListener={false} dragMomentum={false} dragElastic={0} dragConstraints={viewport}
+            onDrag={reportInput} onDragEnd={reportInput}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.2, ease: EASE_OUT }}
           >
-            <CloseDot label={`Close ${card.title}`} onClose={() => setCard(null)} className="absolute start-3 top-3 z-10" />
-            <GuideCard
+            <VisualFrame title={card.title} onClose={() => setCard(null)} onMoveStart={(event) => cardDrag.start(event)} onMoveKey={(event) => moveByKey(event, "card")}>
+              <GuideCard
               type="checklist"
               data={{ strip: "Dalil", heading: card.title, items: card.lines }}
               width={380}
               pill={null}
-            />
+              />
+            </VisualFrame>
           </motion.div>
         ) : null}
       </motion.div>

@@ -4,8 +4,20 @@ import assert from "node:assert/strict";
 // @ts-expect-error TS5097
 import * as voice from "./voice.ts";
 
-const { base64ToBytes, clampLevel, friendlyVoiceError, voiceCode, speak, startListening, stopAndTranscribe, cancelListening, onLevel, LEVEL_EVENT } =
+const { base64ToBytes, clampLevel, friendlyVoiceError, voiceCode, speak, speechChunks, startListening, stopAndTranscribe, cancelListening, onLevel, LEVEL_EVENT } =
   voice;
+
+describe("long spoken explanations", () => {
+  it("keeps all words within the native limit, including Unicode and unbroken text", () => {
+    const text = "A useful explanation. ".repeat(180) + "مرحبا 😀 ".repeat(160);
+    const chunks = speechChunks(text);
+    assert.ok(chunks.length > 1);
+    assert.ok(chunks.every((chunk) => Array.from(chunk).length <= 1100));
+    assert.equal(chunks.join(" ").replace(/\s+/g, " "), text.trim().replace(/\s+/g, " "));
+    assert.equal(speechChunks("😀".repeat(2400)).join(""), "😀".repeat(2400));
+    assert.deepEqual(speechChunks("  "), []);
+  });
+});
 
 const SENTENCE = /^[A-Z][^.!?]*\.$/;
 const CODES = [

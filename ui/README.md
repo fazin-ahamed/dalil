@@ -86,7 +86,9 @@ npm run shell:dev     # GDK_BACKEND=x11 tauri dev (Wayland ignores client window
 npm run shell:build   # static export, then tauri build
 ```
 
-Known limits: no global hotkey yet (modifier-only chords need the platform work in TRD spike S1); on GNOME Wayland the notch cannot pin itself to the top without the planned shell extension. `src-tauri/src/lib.rs` has not been compiled in the build environment that wrote it.
+Known limits: Linux hotkeys use compositor bindings below; on GNOME Wayland the notch cannot pin itself to the top without the planned shell extension. The Linux native build is verified; physical input on Windows and Wayland still needs device testing.
+
+For Windows prerequisites, local compilation, an installer and startup logs, see [WINDOWS-BUILD.md](WINDOWS-BUILD.md).
 
 ### Keybinding
 
@@ -115,4 +117,26 @@ bind = SUPER, space, exec, dalil --ask
 ```
 
 A compositor bind fires on key press only, so hold-to-talk is not possible: `--talk` toggles listening on each press instead. A flag given before Dalil is running applies once the notch is up.
+
+### Chat, tools and background tasks
+
+Chat supports longer explanations, formatted examples, code blocks and source links. Search is on by default and can be toggled for the next message. It retrieves public Bing RSS results without a separate search key; throttling or unavailable results are reported in the task activity. Queries go to Bing, and retrieved snippets go to the saved model endpoint.
+
+Enable Screen in chat (or screenshots in Setup) to include screen context. The Screen toggle preserves the endpoint and API key. This setting is checked in both the frontend and the native capture command. Computer control is off by default. The Control button enables a task to click, type, use shortcuts and scroll, inspecting a fresh screenshot after each action. A task stops after twelve actions and must verify the result before reporting success. Opening chat or Setup interrupts desktop input; Stop cancels further work. An in-flight model request may finish on the server after Stop, but its reply cannot start another action.
+
+Computer control uses Windows input APIs, or `ydotool` plus `wtype` on niri Wayland. On Wayland, `ydotoold` must be running and accessible, with one unrotated display at 100% scale and flat pointer acceleration. Other display configurations fail before input rather than guess coordinates. X11 and macOS control are not implemented. Physical input still needs testing on each target desktop.
+
+Up to four explanation/search tasks can run together. Hide chat to continue working and reopen it to read results; computer tasks run alone. Tasks and chat survive dismissal, and remain in memory until the app exits or a new conversation starts. Diagram and 3D replies have a Show button for reopening their panels. Drag panels by their title, or focus the title and use arrow keys (Shift moves farther). Their close buttons remain independent of chat.
+
+After ten seconds without interaction, the notch shrinks to a small floating pill, pauses for one second, then fades away. Listening and speaking keep it open. Escape, clicking outside, or switching focus to another app starts the same transition. Hover the small target at the top centre, or run `dalil --ask`, to bring it back. Hiding retains the draft, conversation and running tasks.
+
+On Windows, left-click the tray icon to open chat; right-click for Settings, shortcuts and Exit Dalil. Closing the notch with Alt+F4 hides it; Exit Dalil quits the process. Launching the executable again reopens the running instance.
+
+| Windows shortcut | Action |
+| --- | --- |
+| Ctrl+Alt+Space | Show / hide chat |
+| Ctrl+Alt+Shift+Space | Toggle voice input |
+| Ctrl+Alt+Esc | Hide and stop screen control |
+
+Shortcuts work while another app has focus. The tray menu and chat's keyboard help report bindings already taken by another app; those actions remain available from the tray.
 

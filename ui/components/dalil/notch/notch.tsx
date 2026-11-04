@@ -11,7 +11,6 @@ import {
   RiErrorWarningLine,
   RiGlobalLine,
   RiMacbookLine,
-  RiArrowUpLine,
   RiMicLine,
   RiReceiptLine,
   RiSettings3Line,
@@ -21,10 +20,11 @@ import { BrandMark } from "@/components/dalil/brand-mark";
 import { Button } from "@/components/base/buttons/button";
 import { IconButton } from "@/components/base/buttons/icon-button";
 import { Chip } from "@/components/base/badges/chip";
-import { InputBase, TextField } from "@/components/base/input/input";
 import { Tooltip, TooltipTrigger } from "@/components/base/tooltip/tooltip";
 import { cx } from "@/utils/cx";
 import { dayPartForHour, fill, usePrefersReducedMotion } from "./hooks";
+import { ChatPanel, type ChatPanelActions, type ChatPanelData } from "./chat-panel";
+import type { AgentTask, WebSource, Scene } from "@/lib/contracts";
 
 /* ------------------------------------------------------------------ types */
 
@@ -46,6 +46,10 @@ export interface ChatBubble {
   role: "user" | "assistant";
   text: string;
   steps?: string[];
+  taskId?: string;
+  status?: AgentTask["status"];
+  sources?: WebSource[];
+  scene?: Scene | null;
 }
 
 export type NotchAction = "open-setup" | "open-ask" | "open-talk" | "open-receipts" | "dismiss" | "skip" | "retry";
@@ -67,7 +71,10 @@ interface NotchCommon {
   /** The Setup face. Always mounted so it can fade in; only visible while `state` is "setup". */
   setupPanel?: ReactNode;
   /** Called with the visible shape (logical pixels) whenever it changes, for input regions. */
-  onShape?: (shape: { w: number; h: number }) => void;
+  onShape?: (shape: { w: number; h: number; y: number }) => void;
+  working?: number;
+  compact?: boolean;
+  shortcutHint?: string;
 }
 
 export type NotchProps = NotchCommon &
@@ -88,18 +95,7 @@ export type NotchProps = NotchCommon &
         /** The action the button fires. Defaults to "retry". */
         action?: "retry" | "open-setup";
       }
-    | {
-        state: "ask";
-        draft: string;
-        onDraft: (v: string) => void;
-        onSubmit: (v: string) => void;
-        busy: boolean;
-        messages: ChatBubble[];
-        error: string | null;
-        contextLabel?: string;
-        /** Starts or stops voice from the mic button. */
-        onTalk?: () => void;
-      }
+    | ({ state: "ask" } & ChatPanelData & ChatPanelActions)
   );
 
 /* ------------------------------------------------------------------ geometry */
@@ -116,11 +112,12 @@ export const NOTCH_SHAPES: Record<NotchState, { w: number; h: number }> = {
   done: { w: 280, h: 46 },
   error: { w: 400, h: 84 },
   setup: { w: 560, h: 300 },
-  ask: { w: 520, h: 124 },
+  ask: { w: 536, h: 360 },
 };
 
 /** The persistent element is this size. States are revealed from it with clip-path. */
 export const NOTCH_STAGE = { w: 560, h: 200 } as const;
+export const NOTCH_COMPACT = { w: 64, h: 18, y: 6 } as const;
 
 const RADIUS_REST = 16;
 const RADIUS_OPEN = 28;
@@ -154,13 +151,7 @@ interface ErrorData {
   action: "retry" | "open-setup";
 }
 
-interface AskData {
-  draft: string;
-  busy: boolean;
-  messages: ChatBubble[];
-  error: string | null;
-  contextLabel: string;
-}
+type AskData = ChatPanelData;
 
 interface LayerMap {
   home: HomeData;
@@ -216,6 +207,14 @@ function liveData(p: NotchProps): Live | null {
           messages: p.messages,
           error: p.error,
           contextLabel: p.contextLabel ?? "",
+          tasks: p.tasks,
+          searchEnabled: p.searchEnabled,
+          computerEnabled: p.computerEnabled,
+          screenEnabled: p.screenEnabled,
+          screenChanging: p.screenChanging,
+          shortcuts: p.shortcuts,
+          computerSupported: p.computerSupported,
+          computerReason: p.computerReason,
         },
       };
     default:
@@ -265,7 +264,7 @@ function captionFor(p: NotchProps): string {
  * of travel. Controlled: change `state` at any moment and everything retargets from where it is.
  */
 export function Notch(props: NotchProps) {
-  const { state, onAction, level = 0, className, stageHeight = NOTCH_STAGE.h, setupPanel, onShape } = props;
+  const { state, onAction, level = 0, className, stageHeight = NOTCH_STAGE.h, setupPanel, onShape, working = 0, compact = false, shortcutHint } = props;
   const reduced = usePrefersReducedMotion();
 
   /* Keep each layer's last data so a layer fading out still shows what it showed. */
@@ -285,22 +284,23 @@ export function Notch(props: NotchProps) {
 
   const active = layerOf(state);
   const spec = NOTCH_SHAPES[state];
-  const w = spec.w;
-  const h = Math.min(stageHeight, Math.max(spec.h, heights[active] ?? 0));
-  const r = state === "rest" ? RADIUS_REST : RADIUS_OPEN;
+  const w = compact ? NOTCH_COMPACT.w : spec.w;
+  const h = compact ? NOTCH_COMPACT.h : Math.min(stageHeight, Math.max(spec.h, heights[active] ?? 0));
+  const top = compact ? NOTCH_COMPACT.y : 0;
+  const r = compact ? h / 2 : state === "rest" ? RADIUS_REST : RADIUS_OPEN;
   const x = (NOTCH_STAGE.w - w) / 2;
-  const y = stageHeight - h;
+  const y = stageHeight - h - top;
 
   const onShapeRef = useRef(onShape);
   useEffect(() => {
     onShapeRef.current = onShape;
   });
   useEffect(() => {
-    onShapeRef.current?.({ w, h });
-  }, [w, h]);
+    onShapeRef.current?.({ w, h, y: top });
+  }, [w, h, top]);
 
-  const bodyClip = `inset(0px ${x}px ${y}px ${x}px round 0px 0px ${r}px ${r}px)`;
-  const edgeClip = `inset(0px ${Math.max(0, x - 1)}px ${Math.max(0, y - 1)}px ${Math.max(0, x - 1)}px round 0px 0px ${r + 1}px ${r + 1}px)`;
+  const bodyClip = `inset(${top}px ${x}px ${y}px ${x}px round ${compact ? `${r}px` : `0px 0px ${r}px ${r}px`})`;
+  const edgeClip = `inset(${Math.max(0, top - 1)}px ${Math.max(0, x - 1)}px ${Math.max(0, y - 1)}px ${Math.max(0, x - 1)}px round ${compact ? `${r + 1}px` : `0px 0px ${r + 1}px ${r + 1}px`})`;
 
   /* Timing. Any state that enters Listening takes the fast path: no delay, 160ms. */
   const fast = state === "listening";
@@ -352,6 +352,7 @@ export function Notch(props: NotchProps) {
     <div
       role="group"
       aria-label={copy.aria.notch_region}
+      data-notch-compact={compact}
       style={{ ...timing, height: stageHeight }}
       className={cx("pointer-events-none relative w-140 select-none", className)}
     >
@@ -388,9 +389,11 @@ export function Notch(props: NotchProps) {
           style={{ clipPath: bodyClip }}
         >
           <Layer active={active === "rest"} reduced={reduced}>
-            <div className="flex h-7.5 w-33 items-center justify-center text-notch-ink">
-              <BrandMark className="size-3.5" />
-            </div>
+            <Button variant="ghost" aria-label={working ? `Open chat, ${working} tasks running` : "Open Dalil chat"}
+              onClick={() => fire("open-ask")} className={cx("pointer-events-auto gap-2 bg-transparent px-0 text-notch-ink hover:bg-notch-raised", compact ? "mt-1.5 h-4.5 w-16 rounded-full" : "h-7.5 w-33 rounded-none")}>
+              {compact ? <span aria-hidden className={cx("size-1.5 rounded-full", working ? "bg-notch-accent motion-safe:animate-pulse" : "bg-notch-raised-2")} /> : <BrandMark className="size-3.5" />}
+              {!compact && working > 0 && <span className="flex items-center gap-1.5 text-caption-1-medium text-notch-ink-2"><span className="size-1.5 rounded-full bg-notch-accent motion-safe:animate-pulse" />{working}</span>}
+            </Button>
           </Layer>
 
           <Layer active={active === "setup"} reduced={reduced}>
@@ -398,7 +401,7 @@ export function Notch(props: NotchProps) {
           </Layer>
 
           <Layer active={active === "home"} reduced={reduced}>
-            <HomeLayer data={home} onAction={fire} active={active === "home"} />
+            <HomeLayer data={home} onAction={fire} active={active === "home"} shortcutHint={shortcutHint} />
           </Layer>
 
           <Layer active={active === "listening"} reduced={reduced}>
@@ -429,10 +432,7 @@ export function Notch(props: NotchProps) {
             <AskLayer
               data={ask}
               active={active === "ask"}
-              live={active === "ask" && !reduced}
-              onDraft={askProps?.onDraft}
-              onSubmit={askProps?.onSubmit}
-              onTalk={askProps?.onTalk}
+              actions={askProps ?? {}}
               report={reportHeight}
             />
           </Layer>
@@ -503,10 +503,12 @@ function HomeLayer({
   data,
   onAction,
   active,
+  shortcutHint,
 }: {
   data: HomeData;
   onAction: (a: NotchAction) => void;
   active: boolean;
+  shortcutHint?: string;
 }) {
   const part = dayPartForHour(data.hour);
   const greeting = fill(copy.notch.home.greeting[part], { name: data.name });
@@ -536,7 +538,7 @@ function HomeLayer({
         <p className="text-title-2-semibold text-notch-ink">{greeting}</p>
         {endpoint ? (
           <>
-            <Hint text={copy.notch.home.hint_bind} />
+            <Hint text={shortcutHint ?? copy.notch.home.hint_bind} />
             <div className="mt-1.5 flex items-center gap-2">
               <Button size="medium" leadingIcon={RiMicLine} className={FOCUS_ON_NOTCH} onClick={() => onAction("open-talk")}>
                 {copy.notch.home.talk_button}
@@ -876,116 +878,12 @@ function ErrorLayer({
 
 /* Ask */
 
-/** The conversation: bubbles scroll above one input row (mic, field, send) that stays put. */
-function AskLayer({
-  data,
-  active,
-  live,
-  onDraft,
-  onSubmit,
-  onTalk,
-  report,
-}: {
+function AskLayer({ data, active, actions, report }: {
   data: AskData;
   active: boolean;
-  live: boolean;
-  onDraft?: (v: string) => void;
-  onSubmit?: (v: string) => void;
-  onTalk?: () => void;
+  actions: ChatPanelActions;
   report: (key: LayerKey, h: number) => void;
 }) {
   const ref = useReportHeight("ask", report);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const threadRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!active) return;
-    const frame = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(frame);
-  }, [active]);
-
-  /* Keep the newest bubble in view. */
-  useEffect(() => {
-    const el = threadRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight });
-  }, [data.messages.length, data.busy, data.error]);
-
-  const question = data.draft.trim();
-  const canSend = question !== "" && !data.busy;
-  const send = () => {
-    if (canSend) onSubmit?.(question);
-  };
-  const empty = data.messages.length === 0 && !data.busy && !data.error;
-
-  return (
-    <div ref={ref} className="pointer-events-auto flex w-130 flex-col gap-3 px-4 pt-4 pb-4">
-      {data.contextLabel && <p className="px-1 text-caption-1-medium text-text-tertiary">{data.contextLabel}</p>}
-      <div ref={threadRef} className="flex max-h-100 min-h-8 flex-col gap-2 overflow-y-auto overscroll-contain px-1">
-        {empty && <p className="py-2 text-center text-body-regular text-notch-muted">{copy.ask.empty_hint}</p>}
-        {data.messages.map((message, i) =>
-          message.role === "user" ? (
-            <p
-              key={i}
-              className="ms-auto max-w-[85%] rounded-2xl rounded-br-md bg-notch-primary px-3.5 py-2 text-body-regular text-text-white"
-            >
-              {message.text}
-            </p>
-          ) : (
-            <div
-              key={i}
-              className="flex max-w-[90%] flex-col gap-2 rounded-2xl rounded-bl-md bg-notch-raised-2 px-3.5 py-2.5"
-            >
-              <p className="text-body-regular text-notch-ink">{message.text || copy.ask.empty_reply}</p>
-              {message.steps && message.steps.length > 0 && (
-                <ol className="flex list-decimal flex-col gap-1 ps-5 text-body-regular text-notch-ink-2 marker:text-notch-muted">
-                  {message.steps.map((step, n) => (
-                    <li key={n}>{step}</li>
-                  ))}
-                </ol>
-              )}
-            </div>
-          ),
-        )}
-        {data.busy && (
-          <div className="flex items-center gap-3 self-start rounded-2xl rounded-bl-md bg-notch-raised-2 px-3.5 py-2.5">
-            <ShimmerBars live={live} />
-            <span className="text-body-regular text-notch-ink-2">{copy.ask.thinking}</span>
-          </div>
-        )}
-        {data.error && (
-          <p role="alert" className="rounded-2xl bg-notch-raised-2 px-3.5 py-2.5 text-body-regular text-text-error-primary">
-            {data.error}
-          </p>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        <IconButton
-          icon={RiMicLine}
-          aria-label={copy.ask.talk}
-          onClick={onTalk}
-          className={cx(FOCUS_ON_NOTCH, "size-10 shrink-0 rounded-full")}
-        />
-        <TextField value={data.draft} onChange={onDraft} aria-label={copy.ask.aria_label} className="min-w-0 flex-1">
-          <InputBase
-            ref={inputRef}
-            placeholder={copy.ask.placeholder}
-            fieldClassName="rounded-full focus-within:ring-border-focus-ring"
-            onKeyDown={(e) => {
-              /* One line: Enter sends, Shift+Enter does nothing, and the Enter that confirms an IME never sends. */
-              if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
-              e.preventDefault();
-              send();
-            }}
-          />
-        </TextField>
-        <Button
-          size="small"
-          leadingIcon={RiArrowUpLine}
-          aria-label={copy.ask.send}
-          disabled={!canSend}
-          onClick={send}
-          className={cx(FOCUS_ON_NOTCH, "size-10 shrink-0 rounded-full px-0")}
-        />
-      </div>
-    </div>
-  );
+  return <div ref={ref}><ChatPanel data={data} active={active} actions={actions} /></div>;
 }

@@ -53,6 +53,43 @@ export interface ScreenShot {
   /** Pixel size of the image in `dataUrl`. */
   width: number;
   height: number;
+  /** Desktop coordinates of the captured display, before the image was resized. */
+  screen?: ScreenBounds;
+}
+
+export interface ScreenBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface WebSource {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+/** One observable action per model turn. No shell commands or arbitrary code. */
+export type AgentAction =
+  | { type: "search"; query: string }
+  | { type: "click"; x: number; y: number; button?: "left" | "right"; double?: boolean }
+  | { type: "type"; text: string }
+  | { type: "key"; keys: string[] }
+  | { type: "scroll"; direction: "up" | "down"; amount: number }
+  | { type: "look" };
+
+export interface AgentActivity {
+  label: string;
+  status: "running" | "done" | "error";
+}
+
+export interface AgentTask {
+  id: string;
+  question: string;
+  status: "running" | "done" | "error" | "stopped";
+  computer: boolean;
+  activities: AgentActivity[];
 }
 
 /* ------------------------------------------------------------------ generated visuals */
@@ -150,7 +187,7 @@ export interface ChatMessage {
 
 /** A step-by-step answer. `steps` is empty for a plain explanation. */
 export interface TutorReply {
-  /** The spoken or typed answer, 1 to 3 sentences. */
+  /** The explanation, with paragraphs, examples and light Markdown when useful. */
   text: string;
   /** Ordered things to do on screen, each one short imperative sentence. */
   steps: string[];
@@ -162,6 +199,10 @@ export interface TutorReply {
   topic: string | null;
   /** What happened, for memory: "learned", "struggled" or "asked". */
   kind: Lesson["kind"];
+  /** Present only while the agent needs a tool result before it can finish. */
+  action?: AgentAction;
+  /** Real search results collected by the runner, never invented by the model. */
+  sources?: WebSource[];
 }
 
 /** Saved endpoint as the chat client needs it. The key comes from the OS keychain at call time. */

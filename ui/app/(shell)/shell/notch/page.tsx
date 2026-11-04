@@ -6,28 +6,16 @@ import { NOTCH_STAGE, Notch, type NotchAction, type NotchEndpoint } from "@/comp
 import { useTutor, type TutorView } from "./use-tutor";
 import { SetupPanel } from "@/components/dalil/setup/setup-panel";
 import { useEndpointSetup } from "@/components/dalil/setup/use-endpoint-setup";
-import {
-  inputMode,
-  isTauri,
-  loadEndpoint,
-  onCommand,
-  onEndpointChanged,
-  saveEndpoint,
-  setInputRect,
-  setInteractive,
-  setKeyboard,
-} from "@/lib/native-bridge";
+import { desktopShortcuts, onShortcutsChanged, type DesktopShortcut, inputMode, isTauri, loadEndpoint, onCommand, onEndpointChanged, onWindowBlur, saveEndpoint, setInputRect, setInteractive, setKeyboard } from "@/lib/native-bridge";
+import { cx } from "@/utils/cx";
 
 const HOVER_OPEN_MS = 200;
 const HOVER_CLOSE_MS = 700;
-/** Tall enough for Setup with a model list. The window is this tall; only the visible shape takes the mouse. */
+const IDLE_MS = 10_000;
+const COMPACT_MS = 1000;
 const STAGE_HEIGHT = 640;
-
-interface PointerPayload {
-  inside: boolean;
-  x: number;
-  y: number;
-}
+const WAKE = { left: (NOTCH_STAGE.w - 132) / 2, w: 132, h: 8, y: 0 };
+interface PointerPayload { inside: boolean; x: number; y: number }
 
 async function readUserName(): Promise<string> {
   if (!isTauri()) return "there";
@@ -35,178 +23,223 @@ async function readUserName(): Promise<string> {
   return invoke<string>("user_name");
 }
 
-/**
- * The desktop notch window. Rust reports the cursor in window pixels; this page decides whether the
- * cursor is over the visible shape, asks for the mouse only then, and opens Home after a short hover.
- * On a Wayland layer-shell notch (niri, Sway, Hyprland, KDE) Rust reads the pointer from GDK and the
- * page tells Rust which rectangle takes the mouse. In a plain browser (next dev) the same page runs with a
- * mouse for design work.
- */
+/** Hidden notch leaves a small top-edge target; hovering it or using --ask brings it back. */
 export default function NotchWindow() {
   const [view, setView] = useState<"rest" | "home" | "setup" | TutorView>("rest");
+  const [visibility, setVisibility] = useState<"visible" | "compact" | "hidden">("visible");
+  const hidden = visibility === "hidden";
+  const [shortcuts, setShortcuts] = useState<DesktopShortcut[]>([]);
   const [endpoint, setEndpoint] = useState<NotchEndpoint | undefined>();
   const [name, setName] = useState("there");
   const [region, setRegion] = useState(false);
   const viewRef = useRef(view);
-  /** Where the visible notch is, in window pixels, as the Notch last reported it. */
-  const rectRef = useRef({ left: 0, w: 0, h: 0 });
-  const overRef = useRef(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => {
-    viewRef.current = view;
-  });
-
-  useEffect(() => {
-    let alive = true;
-    const refresh = () =>
-      void loadEndpoint().then((saved) => {
-        if (alive) setEndpoint(saved ? { model: saved.model, host: saved.host, local: saved.local } : undefined);
-      });
-    refresh();
-    void readUserName().then((n) => alive && setName(n));
-    let off = () => {};
-    void onEndpointChanged(refresh).then((fn) => (off = fn));
-    return () => {
-      alive = false;
-      off();
-    };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    void inputMode().then((mode) => alive && mode === "region" && setRegion(true));
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  /* The Notch reports its visible shape. Rust keeps the mouse to that rectangle (layer-shell) and
-     the pointer hit-test below uses it too. */
+  const hiddenRef = useRef(hidden);
+  const visibilityRef = useRef(visibility);
   const regionRef = useRef(region);
-  useEffect(() => {
-    regionRef.current = region;
-  });
-  const onShape = useCallback(({ w, h }: { w: number; h: number }) => {
-    const left = Math.round((NOTCH_STAGE.w - w) / 2);
-    rectRef.current = { left, w, h };
-    if (regionRef.current) void setInputRect(left, 0, w, h);
+  const rectRef = useRef({ left: WAKE.left, w: 132, h: 30, y: 0 });
+  const lastPointer = useRef<PointerPayload | null>(null);
+  const overRef = useRef(false);
+  const suppressWake = useRef(false);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const host = useRef<HTMLDivElement>(null);
+  const tutor = useTutor(setView);
+  const { openAsk, close: closeTutor, toggleTalk, submit, stopComputer } = tutor;
+
+  useEffect(() => { viewRef.current = view; hiddenRef.current = hidden; visibilityRef.current = visibility; regionRef.current = region; });
+  useEffect(() => () => { clearTimeout(hideTimer.current); clearTimeout(hoverTimer.current); }, []);
+  const hide = useCallback((explicit = true) => {
+    clearTimeout(hoverTimer.current);
+    clearTimeout(idleTimer.current);
+    suppressWake.current = explicit;
+    if (visibilityRef.current !== "visible") return;
+    visibilityRef.current = "compact";
+    setVisibility("compact");
+    closeTutor();
+    void setKeyboard(false);
+    hideTimer.current = setTimeout(() => {
+      visibilityRef.current = "hidden";
+      hiddenRef.current = true;
+      setVisibility("hidden");
+    }, COMPACT_MS);
+  }, [closeTutor]);
+  const reveal = useCallback(() => {
+    clearTimeout(hideTimer.current);
+    clearTimeout(hoverTimer.current);
+    suppressWake.current = false;
+    overRef.current = false;
+    hiddenRef.current = false;
+    visibilityRef.current = "visible";
+    setVisibility("visible");
   }, []);
-  useEffect(() => {
-    const { left, w, h } = rectRef.current;
-    if (region && w) void setInputRect(left, 0, w, h);
-  }, [region]);
+  const resetIdle = useCallback(() => {
+    clearTimeout(idleTimer.current);
+    if (visibilityRef.current === "visible" && viewRef.current !== "listen" && !tutor.speaking) idleTimer.current = setTimeout(() => hide(false), IDLE_MS);
+  }, [hide, tutor.speaking]);
 
   useEffect(() => {
-    void setKeyboard(view === "setup" || view === "ask" || view === "listen");
-  }, [view]);
+    resetIdle();
+    return () => clearTimeout(idleTimer.current);
+  }, [view, visibility, resetIdle]);
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => void loadEndpoint().then((saved) => {
+      if (alive) setEndpoint(saved ? { model: saved.model, host: saved.host, local: saved.local } : undefined);
+    }).catch(() => {});
+    refresh();
+    void readUserName().then((value) => alive && setName(value)).catch(() => {});
+    let off = () => {};
+    void onEndpointChanged(refresh).then((fn) => alive ? (off = fn) : fn());
+    void inputMode().then((mode) => alive && setRegion(mode === "region"));
+    let offShortcuts = () => {};
+    void onShortcutsChanged((bindings) => alive && setShortcuts(bindings)).then((fn) => {
+      if (!alive) { fn(); return; }
+      offShortcuts = fn;
+      void desktopShortcuts().then((bindings) => alive && setShortcuts(bindings)).catch(() => {});
+    });
+    return () => { alive = false; off(); offShortcuts(); };
+  }, []);
+
+  const applyInput = useCallback(() => {
+    const rect = hiddenRef.current ? WAKE : rectRef.current;
+    if (regionRef.current) void setInputRect(rect.left, rect.y, rect.w, rect.h);
+    const p = lastPointer.current;
+    if (p) {
+      const over = p.inside && p.x >= rect.left && p.x <= rect.left + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h;
+      overRef.current = over;
+      void setInteractive(over);
+    }
+  }, []);
+  const onShape = useCallback(({ w, h, y }: { w: number; h: number; y: number }) => {
+    rectRef.current = { left: Math.round((NOTCH_STAGE.w - w) / 2), w, h, y };
+    applyInput();
+  }, [applyInput]);
+  useEffect(() => {
+    applyInput();
+  }, [region, hidden, applyInput]);
+  useEffect(() => { void setKeyboard(visibility === "visible" && (view === "setup" || view === "ask" || view === "listen")); }, [visibility, view]);
 
   const pointerMoved = useCallback((p: PointerPayload) => {
-    const { left, w, h } = rectRef.current;
-    const over = p.inside && p.x >= left && p.x <= left + w && p.y <= h;
+    lastPointer.current = p;
+    const { left, w, h, y } = hiddenRef.current ? WAKE : rectRef.current;
+    const over = p.inside && p.x >= left && p.x <= left + w && p.y >= y && p.y <= y + h;
+    if (!over) suppressWake.current = false;
+    if (over && visibilityRef.current !== "visible" && !suppressWake.current) reveal();
+    if (over) resetIdle();
     if (over === overRef.current) return;
     overRef.current = over;
     void setInteractive(over);
-    clearTimeout(timer.current);
+    clearTimeout(hoverTimer.current);
     if (viewRef.current !== "rest" && viewRef.current !== "home") return;
-    if (over && viewRef.current === "rest") timer.current = setTimeout(() => setView("home"), HOVER_OPEN_MS);
-    if (!over && viewRef.current === "home") timer.current = setTimeout(() => setView("rest"), HOVER_CLOSE_MS);
-  }, []);
+    if (over && viewRef.current === "rest" && !suppressWake.current) hoverTimer.current = setTimeout(() => setView("home"), HOVER_OPEN_MS);
+    if (!over && viewRef.current === "home") hoverTimer.current = setTimeout(() => setView("rest"), HOVER_CLOSE_MS);
+  }, [resetIdle, reveal]);
 
   useEffect(() => {
+    let alive = true;
+    let off = () => {};
     if (isTauri()) {
-      let off = () => {};
       void import("@tauri-apps/api/event").then(({ listen }) =>
-        listen<PointerPayload>("dalil://pointer", (e) => pointerMoved(e.payload)).then((fn) => (off = fn)),
-      );
-      return () => off();
+        listen<PointerPayload>("dalil://pointer", (event) => pointerMoved(event.payload)),
+      ).then((fn) => alive ? (off = fn) : fn());
     }
-    const onMove = (e: MouseEvent) => pointerMoved({ inside: true, x: e.clientX, y: e.clientY });
-    const onLeave = () => pointerMoved({ inside: false, x: -1, y: -1 });
-    window.addEventListener("mousemove", onMove);
+    const onMove = (event: PointerEvent) => {
+      if (isTauri()) return;
+      const bounds = host.current?.getBoundingClientRect();
+      pointerMoved({ inside: true, x: event.clientX - (bounds?.left ?? 0), y: event.clientY - (bounds?.top ?? 0) });
+    };
+    const onLeave = () => { if (!isTauri()) pointerMoved({ inside: false, x: -1, y: -1 }); };
+    const onPress = (event: PointerEvent) => {
+      const { left, w, h, y: top } = hiddenRef.current ? WAKE : rectRef.current;
+      const bounds = host.current?.getBoundingClientRect();
+      const x = event.clientX - (bounds?.left ?? 0);
+      const y = event.clientY - (bounds?.top ?? 0);
+      if (x < left || x > left + w || y < top || y > top + h) hide();
+      else resetIdle();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); hide(); }
+      else resetIdle();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerdown", onPress);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("input", resetIdle);
+    window.addEventListener("focusin", resetIdle);
+    window.addEventListener("wheel", resetIdle, { passive: true });
     document.documentElement.addEventListener("mouseleave", onLeave);
+    let offBlur = () => {};
+    void onWindowBlur(() => { if (viewRef.current !== "rest") hide(); }).then((fn) => alive ? (offBlur = fn) : fn());
     return () => {
-      window.removeEventListener("mousemove", onMove);
+      alive = false; off(); offBlur();
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerdown", onPress);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("input", resetIdle);
+      window.removeEventListener("focusin", resetIdle);
+      window.removeEventListener("wheel", resetIdle);
       document.documentElement.removeEventListener("mouseleave", onLeave);
     };
-  }, [pointerMoved]);
+  }, [hide, pointerMoved, resetIdle]);
 
   const { model, actions } = useEndpointSetup("native", undefined, (saved, key) => {
-    if (!isTauri()) return;
-    void saveEndpoint(saved, key).then(() => setView("home"));
+    if (isTauri()) void saveEndpoint(saved, key).then(() => setView("home"));
   });
-  const setupActions = useMemo(() => ({ ...actions, close: () => setView("rest") }), [actions]);
-
-  const tutor = useTutor(setView);
-  const { openAsk, close: closeTutor, toggleTalk, submit } = tutor;
-
-  /* `dalil --ask` opens the text box. `dalil --talk` starts listening, and the next one stops and asks. */
+  const setupActions = useMemo(() => ({ ...actions, close: () => hide() }), [actions, hide]);
+  const openSetup = useCallback(async () => {
+    await stopComputer();
+    reveal();
+    setView("setup");
+  }, [reveal, stopComputer]);
   useEffect(() => {
+    let alive = true;
     let off = () => {};
     void onCommand((command) => {
-      clearTimeout(timer.current);
-      if (command === "ask") openAsk();
+      clearTimeout(hoverTimer.current);
+      if (command === "hide") { void stopComputer(); hide(); return; }
+      if (command === "toggle" && visibilityRef.current === "visible" && viewRef.current !== "rest") { hide(); return; }
+      reveal();
+      if (command === "ask" || command === "toggle") void openAsk();
       if (command === "talk") void toggleTalk();
-    }).then((fn) => (off = fn));
-    return () => off();
-  }, [openAsk, toggleTalk]);
+      if (command === "setup") void openSetup();
+    }).then((fn) => alive ? (off = fn) : fn());
+    return () => { alive = false; off(); };
+  }, [hide, openAsk, openSetup, reveal, stopComputer, toggleTalk]);
 
-  const onAction = useCallback(
-    (action: NotchAction) => {
-      if (action === "open-setup") {
-        clearTimeout(timer.current);
-        setView("setup");
-      }
-      if (action === "open-ask") openAsk();
-      if (action === "open-talk") void toggleTalk();
-      if (action === "dismiss") {
-        if (viewRef.current === "ask" || viewRef.current === "listen") closeTutor();
-        else setView("rest");
-      }
-    },
-    [openAsk, closeTutor, toggleTalk],
-  );
-
-  /* Setup mounts with the page so it can fade in; move focus into it when it opens. */
+  const onAction = useCallback((action: NotchAction) => {
+    if (action === "dismiss") { hide(); return; }
+    reveal();
+    if (action === "open-setup") void openSetup();
+    if (action === "open-ask") void openAsk();
+    if (action === "open-talk") void toggleTalk();
+  }, [hide, openAsk, openSetup, reveal, toggleTalk]);
   useEffect(() => {
     if (view !== "setup") return;
-    const frame = requestAnimationFrame(() =>
-      document.querySelector<HTMLElement>("[data-shell] [data-autofocus]")?.focus({ preventScroll: true }),
-    );
+    const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-shell] [data-autofocus]")?.focus({ preventScroll: true }));
     return () => cancelAnimationFrame(frame);
   }, [view]);
 
-  const setupPanel = <SetupPanel model={model} actions={setupActions} />;
-  const common = { onAction, onShape, stageHeight: STAGE_HEIGHT, setupPanel };
-  const contextLabel = tutor.contextLabel;
-  const using = [contextLabel && `Using ${contextLabel}`, tutor.project && `Project ${tutor.project.name}`]
-    .filter(Boolean)
-    .join(" · ");
-
-  return (
-    <div className="mx-auto" style={{ width: NOTCH_STAGE.w }}>
-      {view === "listen" ? (
-        <Notch state="listening" transcript="" level={tutor.level} {...common} />
-      ) : view === "ask" ? (
-        <Notch
-          state="ask"
-          draft={tutor.draft}
-          onDraft={tutor.setDraft}
-          onSubmit={(v) => void submit(v)}
-          busy={tutor.busy}
-          messages={tutor.messages}
-          onTalk={() => void toggleTalk()}
-          error={tutor.error}
-          contextLabel={using || undefined}
-          {...common}
-        />
-      ) : view === "setup" ? (
-        <Notch state="setup" {...common} />
-      ) : view === "rest" ? (
-        <Notch state="rest" {...common} />
-      ) : (
-        <Notch state="home" name={name} hour={new Date().getHours()} endpoint={endpoint} {...common} />
-      )}
+  const common = { onAction, onShape, stageHeight: STAGE_HEIGHT, compact: visibility !== "visible", shortcutHint: shortcuts.length ? "Global keyboard shortcuts are listed in the tray menu." : undefined, setupPanel: <SetupPanel model={model} actions={setupActions} />, working: tutor.tasks.filter((task) => task.status === "running").length };
+  const using = [tutor.contextLabel && `Using ${tutor.contextLabel}`, tutor.project && `Project ${tutor.project.name}`].filter(Boolean).join(" · ");
+  return <div ref={host} className="relative mx-auto" style={{ width: NOTCH_STAGE.w }} data-notch-hidden={hidden} data-notch-phase={visibility}>
+    {hidden && <button type="button" aria-label="Open Dalil" onPointerEnter={() => { if (!suppressWake.current) reveal(); }} onFocus={reveal} onClick={() => { reveal(); openAsk(); }}
+      className="absolute top-0 z-10 h-2 w-33 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring" style={{ left: WAKE.left }} />}
+    <div inert={hidden} aria-hidden={hidden} className={cx("origin-top transition-[opacity,transform] duration-260 ease-dalil-out motion-reduce:transform-none motion-reduce:duration-100", hidden ? "pointer-events-none -translate-y-1 scale-75 opacity-0" : "translate-y-0 scale-100 opacity-100")}>
+      {view === "listen" ? <Notch state="listening" transcript="" level={tutor.level} {...common} />
+        : view === "ask" ? <Notch state="ask" draft={tutor.draft} onDraft={tutor.setDraft} onSubmit={(value) => void submit(value)} busy={tutor.busy}
+          messages={tutor.messages} tasks={tutor.tasks} error={tutor.error} contextLabel={using || undefined}
+          onTalk={() => void toggleTalk()} onSearchToggle={() => tutor.setSearchEnabled((on) => !on)} onComputerToggle={tutor.toggleComputer}
+          onStopTask={tutor.stopTask} onNewChat={tutor.newChat} onDismiss={() => hide()} onSetup={() => onAction("open-setup")}
+          onShowVisual={tutor.showVisual}
+          onScreenToggle={() => void tutor.toggleScreen()} screenChanging={tutor.screenChanging}
+          shortcuts={shortcuts}
+          searchEnabled={tutor.searchEnabled} computerEnabled={tutor.computerEnabled} screenEnabled={tutor.screenEnabled}
+          computerSupported={tutor.capabilities.supported} computerReason={tutor.capabilities.reason} {...common} />
+          : view === "setup" ? <Notch state="setup" {...common} />
+            : view === "rest" ? <Notch state="rest" {...common} />
+              : <Notch state="home" name={name} hour={new Date().getHours()} endpoint={endpoint} {...common} />}
     </div>
-  );
+  </div>;
 }

@@ -1,252 +1,272 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { askTutor, callDesktop, friendlyError } from "@/lib/chat";
+import { callDesktop, friendlyError } from "@/lib/chat";
+import { beginComputer, computerAction, computerCapabilities, endComputer, runAgent, untilStopped, type ComputerCapabilities } from "@/lib/agent";
 import { captureScreen } from "@/lib/capture";
 import { annotate, applyRefinement, refineMessages } from "@/lib/refine";
 import type { ChatBubble } from "@/components/dalil/notch";
-import type { ChatMessage, ContextSnapshot, Project } from "@/lib/contracts";
+import type { AgentTask, ChatMessage, ContextSnapshot, Project } from "@/lib/contracts";
 import { getContext, shortApp } from "@/lib/context";
 import { addLesson, formatForPrompt, listLessons, recall } from "@/lib/memory";
-import { loadEndpoint } from "@/lib/native-bridge";
+import { loadEndpoint, setKeyboard, setScreenshots } from "@/lib/native-bridge";
 import { sendOverlay } from "@/lib/overlay";
 import { activeProject, listProjects } from "@/lib/projects";
-import {
-  cancelListening,
-  friendlyVoiceError,
-  onLevel,
-  speak,
-  startListening,
-  stopAndTranscribe,
-  voiceCode,
-  type Speech,
-} from "@/lib/voice";
+import { cancelListening, friendlyVoiceError, onLevel, speak, startListening, stopAndTranscribe, voiceCode, type Speech } from "@/lib/voice";
 
-/** Where the notch should be while the tutor works. The page owns the rest (rest, home, setup). */
 export type TutorView = "ask" | "listen" | "rest";
-
-/** The overlay takes this long to fade out, so a screenshot taken after a clear does not see old drawings. */
 const OVERLAY_CLEAR_MS = 450;
-/** The second look at marks gives up after this long and the first marks are used. */
 const REFINE_TIMEOUT_MS = 25_000;
 
-/**
- * The tutor pipeline for the notch: typed or spoken question, then the focused app, what the screen shows,
- * the active project and recalled lessons, then the reply. A reply with a scene or marks is drawn on the
- * overlay window and, for a spoken question, read aloud. A named topic is saved as a lesson.
- */
+/** Tasks outlive the open panel. Only Stop or a new conversation cancels their work. */
 export function useTutor(setView: (view: TutorView) => void) {
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<ChatBubble[]>([]);
+  const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [context, setContext] = useState<ContextSnapshot | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [level, setLevel] = useState(0);
-
+  const [searchEnabled, setSearchEnabled] = useState(true);
+  const [computerEnabled, setComputerEnabled] = useState(false);
+  const [screenEnabled, setScreenEnabled] = useState(false);
+  const [screenChanging, setScreenChanging] = useState(false);
+  const [capabilities, setCapabilities] = useState<ComputerCapabilities>({ supported: false, reason: "Checking desktop input…" });
   const history = useRef<ChatMessage[]>([]);
   const speech = useRef<Speech | null>(null);
   const drawing = useRef(false);
-  const busyRef = useRef(false);
+  const visible = useRef(false);
+  const controllers = useRef(new Map<string, AbortController>());
+  const computerTask = useRef<string | null>(null);
+  const busy = transcribing || tasks.some((task) => task.status === "running");
 
-  /* The microphone level drives the Listening waveform. */
+  useEffect(() => {
+    let alive = true;
+    void computerCapabilities().then((value) => alive && setCapabilities(value)).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   useEffect(() => {
     if (!listening) return;
     let off = () => {};
     let alive = true;
     void onLevel(setLevel).then((fn) => (alive ? (off = fn) : fn()));
-    return () => {
-      alive = false;
-      off();
-      setLevel(0);
-    };
+    return () => { alive = false; off(); setLevel(0); };
   }, [listening]);
 
-  const stopSpeaking = useCallback(() => {
-    speech.current?.stop();
-    speech.current = null;
-  }, []);
-
+  const stopSpeaking = useCallback(() => { speech.current?.stop(); speech.current = null; setSpeaking(false); }, []);
   const clearOverlay = useCallback(() => {
-    if (!drawing.current) return;
     drawing.current = false;
-    void sendOverlay({ kind: "clear" });
+    return sendOverlay({ kind: "clear" }).catch(() => {});
+  }, []);
+  const stopTask = useCallback(async (id: string) => {
+    controllers.current.get(id)?.abort();
+    if (computerTask.current === id) {
+      await endComputer(id).catch(() => {});
+      if (computerTask.current === id) computerTask.current = null;
+    }
+  }, []);
+  const stopComputer = useCallback(async () => { if (computerTask.current) await stopTask(computerTask.current); }, [stopTask]);
+  const toggleScreen = useCallback(async () => {
+    if (screenChanging) return;
+    const enabled = !screenEnabled;
+    if (!enabled) { stopComputer(); setComputerEnabled(false); }
+    setScreenChanging(true);
+    try { await setScreenshots(enabled); setScreenEnabled(enabled); setError(null); }
+    catch (caught) { setError(friendlyError(caught instanceof Error ? caught.message : String(caught))); }
+    finally { setScreenChanging(false); }
+  }, [screenChanging, screenEnabled, stopComputer]);
+  const showVisual = useCallback((id: string) => {
+    const scene = messages.find((message) => message.taskId === id && message.role === "assistant")?.scene;
+    if (!scene) return;
+    drawing.current = true;
+    void sendOverlay({ kind: "scene", scene }).catch(() => setError("Could not open the explanation panel. Try again."));
+  }, [messages]);
+
+  useEffect(() => {
+    const active = controllers.current;
+    return () => {
+      for (const [id, controller] of active) {
+        controller.abort();
+        void endComputer(id).catch(() => {});
+      }
+      speech.current?.stop();
+      void cancelListening().catch(() => {});
+    };
   }, []);
 
   const refresh = useCallback(async () => {
-    setContext(await getContext());
-    setProject(activeProject(await listProjects()));
+    const [ctx, projects, saved] = await Promise.all([getContext(), listProjects(), loadEndpoint()]);
+    setContext(ctx);
+    setProject(activeProject(projects));
+    setScreenEnabled(Boolean(saved?.useScreenshots));
   }, []);
-
-  const openAsk = useCallback(() => {
+  const openAsk = useCallback(async () => {
+    // Opening the composer interrupts desktop input so a task cannot type into Dalil.
+    await stopComputer();
+    visible.current = true;
     setView("ask");
-    void refresh();
-  }, [refresh, setView]);
-
+    void refresh().catch(() => {});
+  }, [refresh, setView, stopComputer]);
   const close = useCallback(() => {
-    if (listening) void cancelListening();
+    visible.current = false;
+    if (listening) void cancelListening().catch(() => {});
     setListening(false);
     stopSpeaking();
-    clearOverlay();
-    setDraft("");
-    setMessages([]);
-    setError(null);
-    history.current = [];
     setView("rest");
-  }, [listening, setView, stopSpeaking, clearOverlay]);
+  }, [listening, setView, stopSpeaking]);
+  const newChat = useCallback(() => {
+    for (const id of controllers.current.keys()) stopTask(id);
+    stopSpeaking();
+    void clearOverlay();
+    history.current = [];
+    setMessages([]);
+    setTasks([]);
+    setDraft("");
+    setError(null);
+    setComputerEnabled(false);
+  }, [clearOverlay, stopSpeaking, stopTask]);
+  const toggleComputer = useCallback(() => {
+    if (!computerEnabled && (!capabilities.supported || !screenEnabled)) {
+      setError(!screenEnabled ? friendlyError("computer-no-screen") : capabilities.reason);
+      return;
+    }
+    if (computerEnabled && computerTask.current) stopTask(computerTask.current);
+    setComputerEnabled((on) => !on);
+    setError(null);
+  }, [capabilities, computerEnabled, screenEnabled, stopTask]);
 
-  const submit = useCallback(
-    async (text: string, spoken = false) => {
-      const question = text.trim();
-      if (!question || busyRef.current) return;
-      busyRef.current = true;
-      setBusy(true);
-      setError(null);
-      stopSpeaking();
-      setMessages((all) => [...all, { role: "user", text: question }]);
-      setDraft("");
-      try {
-        const saved = await loadEndpoint();
-        if (!saved) throw new Error("no-endpoint");
-
-        // Old drawings must not appear in the screenshot the model is about to read.
-        if (drawing.current) {
-          clearOverlay();
-          await new Promise((resolve) => window.setTimeout(resolve, OVERLAY_CLEAR_MS));
-        }
-        const [ctx, screenshot, active] = await Promise.all([
-          getContext(),
-          captureScreen(),
-          listProjects().then(activeProject),
-        ]);
-        setContext(ctx);
-        setProject(active);
-        const lessons = await listLessons(active?.id);
-        const memory = formatForPrompt(recall(lessons, question, 5, active?.id));
-
-        const answer = await askTutor({
-          endpoint: {
-            base: saved.base,
-            model: saved.model,
-            headerName: saved.headerName,
-            scheme: saved.scheme === "None" ? "None" : "Bearer",
-          },
-          userText: question,
-          context: ctx,
-          memory,
-          history: history.current,
-          screenshot,
-          projectName: active?.name,
-        });
-
-        const turns: ChatMessage[] = [
-          ...history.current,
-          { role: "user", content: question },
-          { role: "assistant", content: answer.text },
-        ];
-        history.current = turns.slice(-12);
-        setMessages((all) => [...all, { role: "assistant", text: answer.text, steps: answer.steps }]);
-
-        if (answer.scene) {
-          drawing.current = true;
-          void sendOverlay({ kind: "scene", scene: answer.scene });
-        } else if (answer.marks.length > 0) {
-          drawing.current = true;
-          // A second look: the model sees its own marks drawn on the screenshot and corrects them.
-          // It must not hold the reply up for long, and a failure just keeps the first marks.
-          const endpoint = {
-            base: saved.base,
-            model: saved.model,
-            headerName: saved.headerName,
-            scheme: saved.scheme === "None" ? ("None" as const) : ("Bearer" as const),
-          };
-          const refined = screenshot
-            ? await Promise.race([
-                annotate(screenshot, answer.marks)
-                  .then((marked) => callDesktop(endpoint, refineMessages(answer.marks, marked)))
-                  .then((raw) => applyRefinement(answer.marks, raw))
-                  .catch(() => answer.marks),
-                new Promise<typeof answer.marks>((resolve) => window.setTimeout(() => resolve(answer.marks), REFINE_TIMEOUT_MS)),
-              ])
-            : answer.marks;
-          if (refined.length > 0) void sendOverlay({ kind: "marks", marks: refined });
-        }
-        if (spoken) {
-          void speak(answer.text).then((s) => {
-            speech.current = s;
-          });
-        }
-        if (answer.topic) {
-          void addLesson(
-            answer.topic,
-            answer.text.slice(0, 240),
-            answer.kind,
-            ctx?.app || undefined,
-            active?.id,
-            answer.marks.length > 0 ? answer.marks : undefined,
-          );
-        }
-      } catch (caught) {
-        setError(friendlyError(caught instanceof Error ? caught.message : String(caught)));
-      } finally {
-        busyRef.current = false;
-        setBusy(false);
+  const submit = useCallback(async (text: string, spoken = false) => {
+    const question = text.trim();
+    if (!question) return;
+    if (controllers.current.size >= 4 || (computerEnabled && controllers.current.size > 0) || computerTask.current) {
+      setError("Wait for the current computer task, or stop it before starting another. Up to four web tasks can run together.");
+      return;
+    }
+    const id = crypto.randomUUID();
+    const controller = new AbortController();
+    const { signal } = controller;
+    controllers.current.set(id, controller);
+    if (computerEnabled) computerTask.current = id;
+    setError(null);
+    stopSpeaking();
+    setMessages((all) => [...all, { role: "user", text: question, taskId: id }, { role: "assistant", text: "", taskId: id, status: "running" }]);
+    setTasks((all) => [...all, { id, question, computer: computerEnabled, status: "running", activities: [{ label: "Reading the question and context", status: "running" }] }]);
+    setDraft("");
+    const task = (patch: Partial<AgentTask>) => setTasks((all) => all.map((t) => t.id === id ? { ...t, ...patch } : t));
+    const reply = (patch: Partial<ChatBubble>) => setMessages((all) => all.map((m) => m.taskId === id && m.role === "assistant" ? { ...m, ...patch } : m));
+    let answered = false;
+    try {
+      const saved = await untilStopped(loadEndpoint(), signal);
+      if (!saved) throw new Error("no-endpoint");
+      if (computerEnabled && !saved.useScreenshots) throw new Error("computer-no-screen");
+      if (computerEnabled) {
+        await untilStopped(beginComputer(id), signal);
+        visible.current = false;
+        setView("rest");
+        await setKeyboard(false);
       }
-    },
-    [stopSpeaking, clearOverlay],
-  );
+      if (drawing.current) await untilStopped(clearOverlay(), signal);
+      if (computerEnabled) await untilStopped(new Promise((resolve) => setTimeout(resolve, OVERLAY_CLEAR_MS)), signal);
+      const [ctx, screenshot, active] = await untilStopped(Promise.all([
+        getContext(), saved.useScreenshots ? captureScreen() : Promise.resolve(null), listProjects().then(activeProject),
+      ]), signal);
+      setContext(ctx);
+      setProject(active);
+      setScreenEnabled(saved.useScreenshots);
+      const lessons = await untilStopped(listLessons(active?.id), signal);
+      const endpoint = { base: saved.base, model: saved.model, headerName: saved.headerName, scheme: saved.scheme === "None" ? "None" as const : "Bearer" as const };
+      task({ activities: [{ label: screenshot ? "Read the screen and conversation" : "Read the conversation", status: "done" }, { label: "Working on an answer", status: "running" }] });
+      const answer = await runAgent({
+        endpoint, userText: question, context: ctx, memory: formatForPrompt(recall(lessons, question, 5, active?.id)),
+        history: history.current, screenshot, projectName: active?.name, tools: { search: searchEnabled, computer: computerEnabled }, signal,
+        act: (action, shot) => computerAction(id, action, shot),
+        observe: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          signal.throwIfAborted();
+          return captureScreen();
+        },
+        onActivity: (activities) => task({ activities }),
+      });
+      signal.throwIfAborted();
+      history.current = [...history.current, { role: "user", content: question } satisfies ChatMessage, {
+        role: "assistant", content: [answer.text, ...answer.steps.map((step, n) => `${n + 1}. ${step}`)].join("\n"),
+      } satisfies ChatMessage].slice(-12);
+      reply({ text: answer.text, steps: answer.steps, sources: answer.sources, scene: answer.scene, status: "done" });
+      answered = true;
 
-  /** One press starts listening, the next stops, transcribes and asks. */
+      if (visible.current && answer.scene) {
+        drawing.current = true;
+        await sendOverlay({ kind: "scene", scene: answer.scene }).catch(() => setError("The answer is ready, but the explanation panel could not open."));
+      } else if (visible.current && answer.marks.length > 0 && screenshot) {
+        const refined = await untilStopped(Promise.race([
+          annotate(screenshot, answer.marks).then((marked) => callDesktop(endpoint, refineMessages(answer.marks, marked)))
+            .then((raw) => applyRefinement(answer.marks, raw)).catch(() => answer.marks),
+          new Promise<typeof answer.marks>((resolve) => setTimeout(() => resolve(answer.marks), REFINE_TIMEOUT_MS)),
+        ]), signal);
+        if (visible.current && refined.length > 0) {
+          drawing.current = true;
+          await sendOverlay({ kind: "marks", marks: refined }).catch(() => setError("The answer is ready, but the screen labels could not open."));
+        }
+      }
+      if (spoken && visible.current) {
+        void speak(answer.text).then((value) => {
+          if (signal.aborted || !visible.current) value?.stop();
+          else {
+            speech.current = value;
+            setSpeaking(true);
+            void value.done.then(() => { if (speech.current === value) { speech.current = null; setSpeaking(false); } });
+          }
+        }).catch(() => {});
+      }
+      if (answer.topic) void addLesson(answer.topic, answer.text.slice(0, 240), answer.kind, ctx?.app || undefined, active?.id, answer.marks.length ? answer.marks : undefined).catch(() => {});
+      task({ status: "done" });
+    } catch (caught) {
+      if (signal.aborted) {
+        task({ status: answered ? "done" : "stopped" });
+        if (!answered) reply({ status: "stopped", text: "Task stopped. Completed actions are listed above." });
+      } else {
+        const message = friendlyError(caught instanceof Error ? caught.message : String(caught));
+        task({ status: "error" });
+        reply({ status: "error", text: message });
+      }
+    } finally {
+      if (computerEnabled) await endComputer(id).catch(() => {});
+      controllers.current.delete(id);
+      if (computerTask.current === id) computerTask.current = null;
+    }
+  }, [clearOverlay, computerEnabled, searchEnabled, setView, stopSpeaking]);
+
   const toggleTalk = useCallback(async () => {
-    if (busyRef.current) return;
+    if (transcribing) return;
+    await stopComputer();
     if (!listening) {
+      visible.current = true;
       stopSpeaking();
       setError(null);
       setView("listen");
       setListening(true);
-      try {
-        await startListening();
-        void refresh();
-      } catch (caught) {
-        setListening(false);
-        setError(friendlyVoiceError(voiceCode(caught)));
-        setView("ask");
-      }
+      try { await startListening(); void refresh().catch(() => {}); }
+      catch (caught) { setListening(false); setError(friendlyVoiceError(voiceCode(caught))); setView("ask"); }
       return;
     }
     setListening(false);
     setView("ask");
-    busyRef.current = true;
-    setBusy(true);
+    setTranscribing(true);
     let heard = "";
-    try {
-      heard = await stopAndTranscribe();
-    } catch (caught) {
-      setError(friendlyVoiceError(voiceCode(caught)));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-    if (heard) {
-      setDraft(heard);
-      await submit(heard, true);
-    }
-  }, [listening, refresh, setView, stopSpeaking, submit]);
+    try { heard = await stopAndTranscribe(); }
+    catch (caught) { setError(friendlyVoiceError(voiceCode(caught))); }
+    finally { setTranscribing(false); }
+    if (heard) await submit(heard, true);
+  }, [listening, refresh, setView, stopComputer, stopSpeaking, submit, transcribing]);
 
   return {
-    draft,
-    setDraft,
-    busy,
-    messages,
-    error,
-    level,
-    listening,
-    project,
-    contextLabel: context ? shortApp(context) : "",
-    openAsk,
-    close,
-    submit,
-    toggleTalk,
+    draft, setDraft, busy, messages, tasks, error, level, listening, speaking, project,
+    contextLabel: context ? shortApp(context) : "", searchEnabled, setSearchEnabled,
+    computerEnabled, toggleComputer, capabilities, screenEnabled, screenChanging, toggleScreen,
+    openAsk, close, submit, toggleTalk, stopTask, stopComputer, showVisual, newChat,
   };
 }

@@ -106,16 +106,45 @@ export async function onLevel(handler: (level: number) => void): Promise<() => v
 export async function speak(text: string): Promise<Speech> {
   const spoken = text.trim();
   if (!spoken) return silence();
-  try {
-    if (!inTauri()) throw new Error("tts-unavailable");
-    return playWav(await invoke<string>("voice_speak", { text: spoken }));
-  } catch (error) {
-    const code = voiceCode(error);
-    if ((code === "tts-unsupported" || code === "tts-unavailable") && hasBrowserVoice()) {
-      return speakInBrowser(spoken);
+  if (!inTauri()) return hasBrowserVoice() ? speakInBrowser(spoken) : silence();
+  const chunks = speechChunks(spoken);
+  const finished = deferred();
+  let stopped = false;
+  let current: Speech | null = null;
+  void (async () => {
+    for (let i = 0; i < chunks.length && !stopped; i++) {
+      try {
+        const wav = await invoke<string>("voice_speak", { text: chunks[i] });
+        if (stopped) break;
+        current = playWav(wav);
+        await current.done;
+      } catch (error) {
+        if (!stopped && ["tts-unsupported", "tts-unavailable"].includes(voiceCode(error)) && hasBrowserVoice()) {
+          current = speakInBrowser(chunks.slice(i).join(" "));
+          await current.done;
+        }
+        break;
+      }
     }
-    return silence();
+  })().catch(() => {}).finally(() => finished.resolve());
+  return { stop: () => { stopped = true; current?.stop(); finished.resolve(); }, done: finished.promise };
+}
+
+/** Stay below the native speech route's 1200-character cap without cutting off an explanation. */
+export function speechChunks(text: string): string[] {
+  const chars = Array.from(text.trim());
+  const chunks: string[] = [];
+  for (let start = 0; start < chars.length;) {
+    let end = Math.min(start + 1100, chars.length);
+    if (end < chars.length) {
+      const space = chars.slice(start, end).findLastIndex((ch) => /\s/.test(ch));
+      if (space > 550) end = start + space;
+    }
+    chunks.push(chars.slice(start, end).join("").trim());
+    start = end;
+    while (start < chars.length && /\s/.test(chars[start])) start++;
   }
+  return chunks;
 }
 
 /** Plays a WAV that `voice_speak` sent as base64. Done resolves when it ends, fails or is stopped. */

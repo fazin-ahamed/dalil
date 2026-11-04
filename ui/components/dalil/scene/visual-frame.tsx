@@ -1,7 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { RiCloseLine } from "@remixicon/react";
+import type { ReactNode, PointerEventHandler, KeyboardEventHandler } from "react";
+import { RiCloseLine, RiDragMove2Line } from "@remixicon/react";
+import { Button } from "@/components/base/buttons/button";
 import { cx } from "@/utils/cx";
 
 /** The red window button: a plain dot that shows its cross on hover or focus, like a Mac window. */
@@ -30,11 +31,15 @@ export function VisualFrame({
   onClose,
   children,
   className,
+  onMoveStart,
+  onMoveKey,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  onMoveStart?: PointerEventHandler<HTMLButtonElement>;
+  onMoveKey?: KeyboardEventHandler<HTMLButtonElement>;
 }) {
   return (
     <section
@@ -43,9 +48,11 @@ export function VisualFrame({
     >
       <header className="relative flex h-9 items-center border-b border-rule bg-paper-2 px-3.5">
         <CloseDot label={`Close ${title}`} onClose={onClose} />
-        <span className="pointer-events-none absolute inset-x-12 truncate text-center text-caption-1-medium text-text-secondary">
-          {title}
-        </span>
+        {onMoveStart ? <Button variant="ghost" size="small" leadingIcon={RiDragMove2Line}
+          aria-label={`Move ${title}; use arrow keys to reposition`} onPointerDown={(event) => { event.currentTarget.focus({ preventScroll: true }); onMoveStart(event); }} onKeyDown={onMoveKey}
+          className="absolute inset-x-10 h-full cursor-grab touch-none justify-center rounded-none bg-transparent text-caption-1-medium text-text-secondary active:cursor-grabbing">
+          <span className="truncate">{title}</span>
+        </Button> : <span className="pointer-events-none absolute inset-x-12 truncate text-center text-caption-1-medium text-text-secondary">{title}</span>}
       </header>
       {children}
     </section>

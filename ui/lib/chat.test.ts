@@ -56,13 +56,13 @@ describe("parseReply", () => {
     assert.deepEqual(parseReply('{"steps": ["a"]}'), { text: '{"steps": ["a"]}', steps: [], marks: [], scene: null, topic: null, kind: "asked" });
   });
 
-  it("truncates text to 600 characters and steps to 8 items of 200", () => {
-    const long = "x".repeat(900);
+  it("allows full explanations while bounding text to 16000 and steps to 8 items of 600", () => {
+    const long = "x".repeat(17000);
     const reply = parseReply(JSON.stringify({ text: long, steps: Array.from({ length: 12 }, () => long), topic: null, kind: "asked" }));
-    assert.equal(reply.text.length, 600);
+    assert.equal(reply.text.length, 16000);
     assert.equal(reply.steps.length, 8);
-    assert.ok(reply.steps.every((step) => step.length === 200));
-    assert.equal(parseReply(long).text.length, 600);
+    assert.ok(reply.steps.every((step) => step.length === 600));
+    assert.equal(parseReply(long).text.length, 16000);
   });
 
   it("drops junk fields: bad kinds become asked, non-string and blank steps go, blank topics become null", () => {

@@ -56,7 +56,7 @@ fn current() -> Option<ContextSnapshot> {
 /// Runs a helper and returns its trimmed stdout. None when it cannot start, fails, prints nothing, or
 /// is still running after 1.5 seconds, in which case it is killed.
 #[cfg(target_os = "linux")]
-fn run(program: &str, args: &[&str]) -> Option<String> {
+pub(crate) fn run(program: &str, args: &[&str]) -> Option<String> {
     use std::{
         io::Read,
         process::{Command, Stdio},

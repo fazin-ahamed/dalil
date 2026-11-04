@@ -21,11 +21,15 @@ use tauri::{AppHandle, Manager, PhysicalPosition, WebviewWindow};
 
 mod capture;
 mod chat;
+mod computer;
 mod context;
+#[cfg(any(windows, test))]
+mod desktop;
 mod memory;
 mod overlay;
 mod projects;
 mod voice;
+mod web;
 
 pub(crate) const KEYRING_SERVICE: &str = "app.dalil.guide";
 pub(crate) const KEYRING_USER: &str = "endpoint-key";
@@ -153,6 +157,28 @@ fn save_endpoint(app: AppHandle, endpoint: SavedEndpoint, key: String) -> Result
     Ok(())
 }
 
+/// Changes screen sharing without saving or deleting the endpoint's keychain entry.
+#[tauri::command]
+fn set_screenshots(app: AppHandle, window: WebviewWindow, enabled: bool) -> Result<(), String> {
+    if window.label() != "notch" { return Err("settings-unavailable".into()); }
+    let path = config_path(&app)?;
+    let bytes = fs::read(&path).map_err(|_| "no-endpoint")?;
+    let updated = screenshot_settings(&bytes, enabled)?;
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, updated).map_err(|_| "settings-unavailable")?;
+    fs::rename(&temporary, &path).map_err(|_| "settings-unavailable")?;
+    notify_changed(&app);
+    Ok(())
+}
+
+fn screenshot_settings(bytes: &[u8], enabled: bool) -> Result<Vec<u8>, String> {
+    let mut saved: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "no-endpoint")?;
+    let object = saved.as_object_mut().ok_or("no-endpoint")?;
+    if !object.get("base").is_some_and(serde_json::Value::is_string) { return Err("no-endpoint".into()); }
+    object.insert("useScreenshots".into(), serde_json::Value::Bool(enabled));
+    serde_json::to_vec_pretty(&saved).map_err(|_| "settings-unavailable".into())
+}
+
 /// The saved settings and whether a key is stored. The key itself stays in the keychain.
 #[tauri::command]
 fn load_endpoint(app: AppHandle) -> Result<Option<LoadedEndpoint>, String> {
@@ -208,8 +234,8 @@ fn apply_input_rect(window: &WebviewWindow, x: i32, y: i32, w: i32, h: i32) {
     gtk_window.input_shape_combine_region(Some(&gtk::cairo::Region::create_rectangle(&rect)));
 }
 
-/// Gives the layer-shell notch the keyboard while a panel with text fields is open (Setup), and
-/// hands it back otherwise. A no-op elsewhere, where the window gets focus the normal way.
+/// Enables keyboard focus while a text panel is open. On-demand layer focus lets a click in another
+/// app return the keyboard; ordinary windows are made focusable only while a panel is open.
 #[tauri::command]
 fn set_keyboard(window: WebviewWindow, on: bool) -> Result<(), String> {
     #[cfg(target_os = "linux")]
@@ -219,19 +245,30 @@ fn set_keyboard(window: WebviewWindow, on: bool) -> Result<(), String> {
             .run_on_main_thread(move || {
                 use gtk_layer_shell::{KeyboardMode, LayerShell};
                 if let Ok(gtk_window) = target.gtk_window() {
-                    gtk_window.set_keyboard_mode(if on { KeyboardMode::Exclusive } else { KeyboardMode::OnDemand });
+                    gtk_window.set_keyboard_mode(if on { KeyboardMode::OnDemand } else { KeyboardMode::None });
+                    if on { use gtk::prelude::GtkWindowExt; gtk_window.present(); }
                 }
             })
             .map_err(|e| e.to_string())?;
     }
-    #[cfg(not(target_os = "linux"))]
-    let _ = (window, on);
+    if !LAYER_SHELL.load(Ordering::Relaxed) {
+        window.set_focusable(on).map_err(|e| e.to_string())?;
+        if on { window.set_focus().map_err(|e| e.to_string())?; }
+    }
     Ok(())
 }
 
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+fn desktop_shortcuts(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    #[cfg(windows)]
+    return desktop::shortcuts(&app);
+    #[cfg(not(windows))]
+    { let _ = app; Ok(Vec::new()) }
 }
 
 /// First name for the greeting, from the login name until Setup can edit it.
@@ -402,12 +439,30 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
         if let Some(command) = parse_command(&argv) {
             handle_command(app, command);
+        } else if argv.len() == 1 {
+            handle_command(app, "ask");
         }
     }));
+    #[cfg(windows)]
+    let builder = builder.on_window_event(|window, event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if window.label() == "notch" {
+                handle_command(window.app_handle(), "hide");
+            } else {
+                use tauri::Emitter;
+                let _ = window.emit("dalil://overlay", serde_json::json!({ "kind": "clear" }));
+                let _ = window.hide();
+            }
+        }
+    });
     builder
+        .manage(computer::ComputerState::default())
         .setup(|app| {
             place_notch(app.handle());
             overlay::setup(app.handle());
+            #[cfg(windows)]
+            desktop::setup(app.handle())?;
             watch_pointer(app.handle().clone());
             // The page subscribes after its window loads, so a cold-start flag waits briefly.
             if let Some(command) = parse_command(&std::env::args().collect::<Vec<String>>()) {
@@ -422,12 +477,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             http_request,
             save_endpoint,
+            set_screenshots,
             load_endpoint,
             set_interactive,
             input_mode,
             set_input_rect,
             set_keyboard,
             quit_app,
+            desktop_shortcuts,
             user_name,
             memory::memory_list,
             memory::memory_add,
@@ -440,6 +497,12 @@ pub fn run() {
             projects::project_rename,
             capture::capture_screen,
             chat::chat_complete,
+            web::web_search,
+            web::open_web_url,
+            computer::computer_capabilities,
+            computer::computer_begin,
+            computer::computer_end,
+            computer::computer_action,
             context::active_context,
             overlay::overlay_show,
             overlay::overlay_hide,
@@ -477,6 +540,19 @@ mod tests {
     #[test]
     fn a_flag_after_other_arguments_is_found() {
         assert_eq!(parse_command(&args(&["dalil", "--debug", "--ask"])), Some("ask"));
+    }
+
+    #[test]
+    fn screen_permission_changes_only_the_flag_and_keeps_unknown_settings() {
+        let original = serde_json::json!({"base":"https://example.com/v1", "model":"test", "useScreenshots":false, "ttsVoice":"alloy", "futureSetting":{"keep":true}});
+        let bytes = serde_json::to_vec(&original).unwrap();
+        let mut expected = original.clone();
+        expected["useScreenshots"] = serde_json::Value::Bool(true);
+        let updated = super::screenshot_settings(&bytes, true).unwrap();
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&updated).unwrap(), expected);
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&super::screenshot_settings(&updated, false).unwrap()).unwrap(), original);
+        assert!(super::screenshot_settings(b"broken", true).is_err());
+        assert!(super::screenshot_settings(b"[]", true).is_err());
     }
 
     #[test]

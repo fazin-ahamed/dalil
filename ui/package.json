@@ -15,7 +15,7 @@
     "shell:dev": "tauri dev",
     "shell:dev:x11": "cross-env GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri dev",
     "shell:build": "tauri build",
-    "shell:build:win": "tauri build --target x86_64-pc-windows-gnu --no-bundle"
+    "shell:build:win": "tauri build --target x86_64-pc-windows-msvc --no-bundle"
   },
   "dependencies": {
     "@remixicon/react": "^4.9.0",
